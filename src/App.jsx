@@ -31,7 +31,7 @@ const DEFAULT_X_ZERO_OFFSET = 0;
 
 // Your calibrated map waypoint offset.
 const DEFAULT_WAYPOINT_OFFSET_X = 0;
-const DEFAULT_WAYPOINT_OFFSET_Y = 20;
+const DEFAULT_WAYPOINT_OFFSET_Y = 30;
 
 const DEFAULT_OCR_INTERVAL = 3;
 const DEFAULT_CITY_INTERVAL = 8;
@@ -86,30 +86,114 @@ function unwrapDx(previousX, latestX, width) {
   return dx;
 }
 
-function buildSlopeLine(points, worldWidth, worldHeight) {
+function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   if (points.length < 2) return null;
 
-  const latest = points[points.length - 1];
-  const previous = points[points.length - 2];
-  const dx = unwrapDx(previous.x, latest.x, worldWidth);
-  const dy = latest.y - previous.y;
+  const recent = points.slice(-Math.max(2, sampleCount));
+  if (recent.length < 2) return null;
 
-  if (dx === 0 && dy === 0) return null;
+  // Unwrap X values so map wrap-around does not look like a giant jump.
+  const unwrapped = [];
+
+  let currentX = Number(recent[0].x);
+
+  unwrapped.push({
+    ...recent[0],
+    unwrappedX: currentX,
+    t: 0
+  });
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const previousRawX = Number(recent[i - 1].x);
+    const latestRawX = Number(recent[i].x);
+
+    const dx = unwrapDx(previousRawX, latestRawX, worldWidth);
+
+    currentX += dx;
+
+    unwrapped.push({
+      ...recent[i],
+      unwrappedX: currentX,
+      t: i
+    });
+  }
+
+  // Linear regression over the time index.
+  // This smooths small OCR jitter instead of using only the last 2 points.
+  const n = unwrapped.length;
+
+  const meanT = unwrapped.reduce((sum, point) => sum + point.t, 0) / n;
+  const meanX = unwrapped.reduce((sum, point) => sum + point.unwrappedX, 0) / n;
+  const meanY = unwrapped.reduce((sum, point) => sum + Number(point.y), 0) / n;
+
+  let denominator = 0;
+  let numeratorX = 0;
+  let numeratorY = 0;
+
+  for (const point of unwrapped) {
+    const dt = point.t - meanT;
+
+    denominator += dt * dt;
+    numeratorX += dt * (point.unwrappedX - meanX);
+    numeratorY += dt * (Number(point.y) - meanY);
+  }
+
+  if (denominator === 0) return null;
+
+  const dxPerStep = numeratorX / denominator;
+  const dyPerStep = numeratorY / denominator;
+
+  if (Math.abs(dxPerStep) < 0.001 && Math.abs(dyPerStep) < 0.001) {
+    return null;
+  }
+
+  const latest = unwrapped[unwrapped.length - 1];
+  const latestUnwrappedX = latest.unwrappedX;
+  const latestY = Number(latest.y);
 
   const candidates = [];
-  if (dx > 0) candidates.push((worldWidth - latest.x) / dx);
-  if (dx < 0) candidates.push((0 - latest.x) / dx);
-  if (dy > 0) candidates.push((worldHeight - latest.y) / dy);
-  if (dy < 0) candidates.push((0 - latest.y) / dy);
+
+  // X boundary with wrap-around.
+  // We use unwrapped map boundaries so the line can continue correctly
+  // when crossing X=0 / X=worldWidth.
+  if (dxPerStep > 0) {
+    const nextBoundary = Math.ceil(latestUnwrappedX / worldWidth) * worldWidth;
+    const boundary = nextBoundary <= latestUnwrappedX
+      ? nextBoundary + worldWidth
+      : nextBoundary;
+
+    candidates.push((boundary - latestUnwrappedX) / dxPerStep);
+  }
+
+  if (dxPerStep < 0) {
+    const previousBoundary = Math.floor(latestUnwrappedX / worldWidth) * worldWidth;
+    const boundary = previousBoundary >= latestUnwrappedX
+      ? previousBoundary - worldWidth
+      : previousBoundary;
+
+    candidates.push((boundary - latestUnwrappedX) / dxPerStep);
+  }
+
+  if (dyPerStep > 0) {
+    candidates.push((worldHeight - latestY) / dyPerStep);
+  }
+
+  if (dyPerStep < 0) {
+    candidates.push((0 - latestY) / dyPerStep);
+  }
 
   const positive = candidates.filter((value) => Number.isFinite(value) && value > 0);
   const t = positive.length ? Math.min(...positive) : 1;
 
   return {
-    start: latest,
+    start: {
+      ...latest,
+      x: normalizeX(latestUnwrappedX, worldWidth),
+      y: clampY(latestY, worldHeight)
+    },
     end: {
-      x: normalizeX(latest.x + dx * t, worldWidth),
-      y: clampY(latest.y + dy * t, worldHeight)
+      x: normalizeX(latestUnwrappedX + dxPerStep * t, worldWidth),
+      y: clampY(latestY + dyPerStep * t, worldHeight)
     }
   };
 }
@@ -204,7 +288,7 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
   // Build the movement slope from the RAW OCR coordinates first, then apply the visual/map offset.
   // This avoids a negative Y offset clamping points before the slope math and breaking the direction line.
   const rawSlopeLine = useMemo(
-    () => buildSlopeLine(coordinates, worldWidth, worldHeight),
+    () => buildSlopeLine(coordinates, worldWidth, worldHeight, 12),
     [coordinates, worldWidth, worldHeight]
   );
 
@@ -695,7 +779,11 @@ export default function App() {
   }, [run]);
 
   const refreshCoordinates = useCallback(async () => {
-    const data = await run(() => api.getLatestCoordinates(), 'Could not load coordinates');
+    const data = await run(
+      () => api.getLatestCoordinates({ take: 20 }),
+      'Could not load coordinates'
+    );
+
     if (data) setCoordinates(data);
   }, [run]);
 

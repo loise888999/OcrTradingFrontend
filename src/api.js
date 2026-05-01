@@ -37,7 +37,8 @@ export const api = {
   startOcr: () => request('/api/ocr/start', { method: 'POST' }),
   stopOcr: () => request('/api/ocr/stop', { method: 'POST' }),
   getOcrStatus: () => request('/api/ocr/status'),
-  getLatestCoordinates: () => request('/api/coordinates/latest'),
+  getLatestCoordinates: ({ take = 20 } = {}) =>
+    request(`/api/coordinates/latest?${params({ take })}`),
   getLatestCity: () => request('/api/cities/latest'),
   getCities: () => request('/api/cities'),
   getTradeGoods: () => request('/api/trade-goods'),
