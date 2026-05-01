@@ -40,7 +40,22 @@ export const api = {
   getLatestCoordinates: ({ take = 20 } = {}) =>
     request(`/api/coordinates/latest?${params({ take })}`),
   getLatestCity: () => request('/api/cities/latest'),
+
+  getGameWindow: () => request('/api/system/game-window'),
+
+  getWindowUnderMouseDelayed: ({ seconds = 5 } = {}) =>
+    request(`/api/system/window-under-mouse-delayed?${params({ seconds })}`),
+
+  selectWindowUnderMouseDelayed: ({ seconds = 5 } = {}) =>
+    request(`/api/system/select-window-under-mouse-delayed?${params({ seconds })}`),
+
+
+  clearSelectedGameWindow: () =>
+    request('/api/system/clear-selected-game-window', {
+      method: 'POST'
+    }),
   getCities: () => request('/api/cities'),
+  getGameWindow: () => request('/api/system/game-window'),
   getTradeGoods: () => request('/api/trade-goods'),
   getTradeGoodSuggestions: ({ name, take = 8 }) => request(`/api/trade-goods/suggestions?${params({ name, take })}`),
   addTradeGood: (payload) => request('/api/trade-goods', { method: 'POST', body: JSON.stringify(payload) }),

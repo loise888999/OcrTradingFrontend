@@ -6,6 +6,7 @@ import {
   Crosshair,
   Download,
   Map,
+  Monitor,
   MousePointer2,
   Pause,
   Play,
@@ -24,16 +25,14 @@ import AutocompleteInput from './components/AutocompleteInput.jsx';
 import AddTradeGoodPanel from './components/AddTradeGoodPanel.jsx';
 import ImportPricesCsvPanel from './components/ImportPricesCsvPanel.jsx';
 import PendingTradeGoodPanel from './components/PendingTradeGoodPanel.jsx';
+import GameWindowPanel from './components/GameWindowPanel.jsx';
 
-const DEFAULT_WORLD_WIDTH = 16300;
+const DEFAULT_WORLD_WIDTH = 16384;
 const DEFAULT_WORLD_HEIGHT = 7200;
 const DEFAULT_X_ZERO_OFFSET = 0;
-
-// Your calibrated map waypoint offset.
 const DEFAULT_WAYPOINT_OFFSET_X = 0;
-const DEFAULT_WAYPOINT_OFFSET_Y = 30;
-
-const DEFAULT_OCR_INTERVAL = 3;
+const DEFAULT_WAYPOINT_OFFSET_Y = 0;
+const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
 const MAP_IMAGE_URL = '/maps/world-map.png';
 
@@ -45,11 +44,7 @@ const zoneNames = {
 
 function sanitizeCityName(value) {
   if (!value) return '';
-  return String(value)
-    .split('(')[0]
-    .split('\n')[0]
-    .split('\r')[0]
-    .trim();
+  return String(value).split('(')[0].split('\n')[0].split('\r')[0].trim();
 }
 
 function normalizeX(value, width) {
@@ -92,36 +87,19 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   const recent = points.slice(-Math.max(2, sampleCount));
   if (recent.length < 2) return null;
 
-  // Unwrap X values so map wrap-around does not look like a giant jump.
   const unwrapped = [];
-
   let currentX = Number(recent[0].x);
-
-  unwrapped.push({
-    ...recent[0],
-    unwrappedX: currentX,
-    t: 0
-  });
+  unwrapped.push({ ...recent[0], unwrappedX: currentX, t: 0 });
 
   for (let i = 1; i < recent.length; i += 1) {
     const previousRawX = Number(recent[i - 1].x);
     const latestRawX = Number(recent[i].x);
-
     const dx = unwrapDx(previousRawX, latestRawX, worldWidth);
-
     currentX += dx;
-
-    unwrapped.push({
-      ...recent[i],
-      unwrappedX: currentX,
-      t: i
-    });
+    unwrapped.push({ ...recent[i], unwrappedX: currentX, t: i });
   }
 
-  // Linear regression over the time index.
-  // This smooths small OCR jitter instead of using only the last 2 points.
   const n = unwrapped.length;
-
   const meanT = unwrapped.reduce((sum, point) => sum + point.t, 0) / n;
   const meanX = unwrapped.reduce((sum, point) => sum + point.unwrappedX, 0) / n;
   const meanY = unwrapped.reduce((sum, point) => sum + Number(point.y), 0) / n;
@@ -132,7 +110,6 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
 
   for (const point of unwrapped) {
     const dt = point.t - meanT;
-
     denominator += dt * dt;
     numeratorX += dt * (point.unwrappedX - meanX);
     numeratorY += dt * (Number(point.y) - meanY);
@@ -143,44 +120,27 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   const dxPerStep = numeratorX / denominator;
   const dyPerStep = numeratorY / denominator;
 
-  if (Math.abs(dxPerStep) < 0.001 && Math.abs(dyPerStep) < 0.001) {
-    return null;
-  }
+  if (Math.abs(dxPerStep) < 0.001 && Math.abs(dyPerStep) < 0.001) return null;
 
   const latest = unwrapped[unwrapped.length - 1];
   const latestUnwrappedX = latest.unwrappedX;
   const latestY = Number(latest.y);
-
   const candidates = [];
 
-  // X boundary with wrap-around.
-  // We use unwrapped map boundaries so the line can continue correctly
-  // when crossing X=0 / X=worldWidth.
   if (dxPerStep > 0) {
     const nextBoundary = Math.ceil(latestUnwrappedX / worldWidth) * worldWidth;
-    const boundary = nextBoundary <= latestUnwrappedX
-      ? nextBoundary + worldWidth
-      : nextBoundary;
-
+    const boundary = nextBoundary <= latestUnwrappedX ? nextBoundary + worldWidth : nextBoundary;
     candidates.push((boundary - latestUnwrappedX) / dxPerStep);
   }
 
   if (dxPerStep < 0) {
     const previousBoundary = Math.floor(latestUnwrappedX / worldWidth) * worldWidth;
-    const boundary = previousBoundary >= latestUnwrappedX
-      ? previousBoundary - worldWidth
-      : previousBoundary;
-
+    const boundary = previousBoundary >= latestUnwrappedX ? previousBoundary - worldWidth : previousBoundary;
     candidates.push((boundary - latestUnwrappedX) / dxPerStep);
   }
 
-  if (dyPerStep > 0) {
-    candidates.push((worldHeight - latestY) / dyPerStep);
-  }
-
-  if (dyPerStep < 0) {
-    candidates.push((0 - latestY) / dyPerStep);
-  }
+  if (dyPerStep > 0) candidates.push((worldHeight - latestY) / dyPerStep);
+  if (dyPerStep < 0) candidates.push((0 - latestY) / dyPerStep);
 
   const positive = candidates.filter((value) => Number.isFinite(value) && value > 0);
   const t = positive.length ? Math.min(...positive) : 1;
@@ -284,9 +244,6 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
     [coordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
   );
 
-  // Important fix:
-  // Build the movement slope from the RAW OCR coordinates first, then apply the visual/map offset.
-  // This avoids a negative Y offset clamping points before the slope math and breaking the direction line.
   const rawSlopeLine = useMemo(
     () => buildSlopeLine(coordinates, worldWidth, worldHeight, 12),
     [coordinates, worldWidth, worldHeight]
@@ -355,8 +312,8 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
       const worldMouseY = (mouseY - currentPan.y) / currentZoom;
       const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
       const nextZoom = Math.max(0.018, Math.min(0.75, currentZoom * factor));
-
       let nextPan;
+
       if (keepCentered && displayCurrent) {
         nextPan = {
           x: normalizePanX(rect.width / 2 - displayCurrent.x * nextZoom, worldWidth, nextZoom),
@@ -453,7 +410,7 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
         <div className="card-header dark-header compact-header">
           <div>
             <h2><Map size={22} /> Full Window Wrapped Map</h2>
-            <p>Drag to move. Mouse wheel zooms only this map. Horizontal pan is normalized for continuous wrap.</p>
+            <p>Drag to move. Mouse wheel zooms only this map. Slope uses a smoothed trend from recent coordinates.</p>
           </div>
           <div className="map-controls">
             <div className="button-row">
@@ -500,7 +457,7 @@ function PricesTab({ prices, refreshPrices }) {
         <div className="tab-header">
           <div>
             <h2><ShoppingCart size={24} /> Buy / Sell Price History</h2>
-            <p className="muted">SQLite-backed price history from the backend.</p>
+            <p className="muted">Timestamps are stored as UTC and displayed in your local time.</p>
           </div>
           <div className="button-row">
             <input className="input" placeholder="Search city or item..." value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -657,6 +614,7 @@ function OcrZoneCard({ title, name, description, zone, onSave }) {
   useEffect(() => setLocal(zone || { name, topLeftX: 0, topLeftY: 0, bottomRightX: 0, bottomRightY: 0 }), [zone, name]);
 
   const update = (key, value) => setLocal((current) => ({ ...current, [key]: Number(value) }));
+
   const waitWithCountdown = async (prefix) => {
     for (let seconds = 5; seconds > 0; seconds -= 1) {
       setCaptureStatus(`${prefix} Capturing in ${seconds} second${seconds === 1 ? '' : 's'}...`);
@@ -675,7 +633,7 @@ function OcrZoneCard({ title, name, description, zone, onSave }) {
       const bottomRight = await api.getMousePosition();
       const updatedZone = { ...local, name, topLeftX: topLeft.x, topLeftY: topLeft.y, bottomRightX: bottomRight.x, bottomRightY: bottomRight.y };
       setLocal(updatedZone);
-      setCaptureStatus('Capture complete. Saving...');
+      setCaptureStatus('Capture complete. Saving relative to game window if found...');
       await onSave(updatedZone);
       setCaptureStatus(`Saved. Top left: ${topLeft.x},${topLeft.y}. Bottom right: ${bottomRight.x},${bottomRight.y}.`);
     } catch (err) {
@@ -704,7 +662,7 @@ function OcrZoneCard({ title, name, description, zone, onSave }) {
   );
 }
 
-function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings }) {
+function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings, run }) {
   const getZone = (name) => zones.find((zone) => zone.name === name);
   const saveMapSetting = async (key, value) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -713,24 +671,43 @@ function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings }) {
 
   return (
     <div className="stack">
-      <Card className="dark-panel"><div className="card-body"><h2><Settings size={24} /> OCR + Map Settings</h2><p>City names and trade goods are controlled by backend CSV files.</p></div></Card>
+      <Card className="dark-panel">
+        <div className="card-body">
+          <h2><Settings size={24} /> OCR + Map Settings</h2>
+          <p>OCR zones are saved relative to the detected game window after setup.</p>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="card-body">
+          <GameWindowPanel run={run} />
+        </div>
+      </Card>
+
       <div className="settings-grid">
-        <Card><div className="card-body"><h3><SlidersHorizontal size={20} /> Fine tune map</h3>
-          <Field label="World width / X wrap limit"><input className="input" type="number" value={settings.worldWidth} onChange={(event) => saveMapSetting('worldWidth', Number(event.target.value || DEFAULT_WORLD_WIDTH))} /></Field>
-          <Field label="World height / Y max"><input className="input" type="number" value={settings.worldHeight} onChange={(event) => saveMapSetting('worldHeight', Number(event.target.value || DEFAULT_WORLD_HEIGHT))} /></Field>
-          <Field label="Visual X=0 offset"><input className="input" type="number" value={settings.xZeroOffset} onChange={(event) => saveMapSetting('xZeroOffset', Number(event.target.value || DEFAULT_X_ZERO_OFFSET))} /></Field>
-          <Field label="Waypoint offset X"><input className="input" type="number" value={settings.waypointOffsetX} onChange={(event) => saveMapSetting('waypointOffsetX', Number(event.target.value || 0))} /></Field>
-          <Field label="Waypoint offset Y"><input className="input" type="number" value={settings.waypointOffsetY} onChange={(event) => saveMapSetting('waypointOffsetY', Number(event.target.value || 0))} /></Field>
-        </div></Card>
-        <Card><div className="card-body"><h3><RefreshCw size={20} /> OCR timing</h3>
-          <Field label="Coordinate / price OCR interval"><input className="input" type="number" min="1" value={settings.ocrInterval} onChange={(event) => saveMapSetting('ocrInterval', Number(event.target.value || DEFAULT_OCR_INTERVAL))} /></Field>
-          <Field label="City OCR interval"><input className="input" type="number" min="1" value={settings.cityInterval} onChange={(event) => saveMapSetting('cityInterval', Number(event.target.value || DEFAULT_CITY_INTERVAL))} /></Field>
-        </div></Card>
+        <Card>
+          <div className="card-body">
+            <h3><SlidersHorizontal size={20} /> Fine tune map</h3>
+            <Field label="World width / X wrap limit"><input className="input" type="number" value={settings.worldWidth} onChange={(event) => saveMapSetting('worldWidth', Number(event.target.value || DEFAULT_WORLD_WIDTH))} /></Field>
+            <Field label="World height / Y max"><input className="input" type="number" value={settings.worldHeight} onChange={(event) => saveMapSetting('worldHeight', Number(event.target.value || DEFAULT_WORLD_HEIGHT))} /></Field>
+            <Field label="Visual X=0 offset"><input className="input" type="number" value={settings.xZeroOffset} onChange={(event) => saveMapSetting('xZeroOffset', Number(event.target.value || DEFAULT_X_ZERO_OFFSET))} /></Field>
+            <Field label="Waypoint offset X"><input className="input" type="number" value={settings.waypointOffsetX} onChange={(event) => saveMapSetting('waypointOffsetX', Number(event.target.value || 0))} /></Field>
+            <Field label="Waypoint offset Y"><input className="input" type="number" value={settings.waypointOffsetY} onChange={(event) => saveMapSetting('waypointOffsetY', Number(event.target.value || 0))} /></Field>
+          </div>
+        </Card>
+        <Card>
+          <div className="card-body">
+            <h3><RefreshCw size={20} /> OCR timing</h3>
+            <Field label="Coordinate / main OCR interval"><input className="input" type="number" min="1" value={settings.ocrInterval} onChange={(event) => saveMapSetting('ocrInterval', Number(event.target.value || DEFAULT_OCR_INTERVAL))} /></Field>
+            <Field label="City OCR interval"><input className="input" type="number" min="1" value={settings.cityInterval} onChange={(event) => saveMapSetting('cityInterval', Number(event.target.value || DEFAULT_CITY_INTERVAL))} /></Field>
+          </div>
+        </Card>
       </div>
+
       <div className="zone-cards">
-        <OcrZoneCard title="Coordinate OCR zone" name={zoneNames.coordinate} description="Reads coordinates like 123,456." zone={getZone(zoneNames.coordinate)} onSave={saveZone} />
-        <OcrZoneCard title="City OCR zone" name={zoneNames.city} description="Only accepted if city is in backend Data/cities.csv." zone={getZone(zoneNames.city)} onSave={saveZone} />
-        <OcrZoneCard title="Item price OCR zone" name={zoneNames.price} description="Reads item, price, optional multiplier, Buy/Sell." zone={getZone(zoneNames.price)} onSave={saveZone} />
+        <OcrZoneCard title="Coordinate OCR zone" name={zoneNames.coordinate} description="One-time setup. After saving, backend stores this zone relative to the detected game window." zone={getZone(zoneNames.coordinate)} onSave={saveZone} />
+        <OcrZoneCard title="City OCR zone" name={zoneNames.city} description="One-time setup. Backend follows the game window after this is saved." zone={getZone(zoneNames.city)} onSave={saveZone} />
+        <OcrZoneCard title="Item price OCR zone" name={zoneNames.price} description="One-time setup for the trade-good/price area. Backend follows the game window after this is saved." zone={getZone(zoneNames.price)} onSave={saveZone} />
       </div>
     </div>
   );
@@ -779,11 +756,7 @@ export default function App() {
   }, [run]);
 
   const refreshCoordinates = useCallback(async () => {
-    const data = await run(
-      () => api.getLatestCoordinates({ take: 20 }),
-      'Could not load coordinates'
-    );
-
+    const data = await run(() => api.getLatestCoordinates({ take: 20 }), 'Could not load coordinates');
     if (data) setCoordinates(data);
   }, [run]);
 
@@ -859,7 +832,7 @@ export default function App() {
       <header className="hero">
         <div>
           <h1>OCR Trading Companion</h1>
-          <p>City whitelist OCR, trade-good filters, pending OCR suggestions, map tracking, Buy/Sell search, CSV import/export, and best route recommendations.</p>
+          <p>Window-relative OCR zones, city whitelist OCR, trade-good filters, map tracking, price sharing, and route recommendations.</p>
         </div>
         <Badge tone="info">React + C# Backend</Badge>
       </header>
@@ -874,10 +847,47 @@ export default function App() {
       </nav>
 
       <main>
-        {activeTab === 'map' && <CoordinateMap coordinates={coordinates} worldWidth={settings.worldWidth} worldHeight={settings.worldHeight} xZeroOffset={settings.xZeroOffset} waypointOffsetX={settings.waypointOffsetX} waypointOffsetY={settings.waypointOffsetY} refreshCoordinates={refreshCoordinates} />}
+        {activeTab === 'map' && (
+          <CoordinateMap
+            coordinates={coordinates}
+            worldWidth={settings.worldWidth}
+            worldHeight={settings.worldHeight}
+            xZeroOffset={settings.xZeroOffset}
+            waypointOffsetX={settings.waypointOffsetX}
+            waypointOffsetY={settings.waypointOffsetY}
+            refreshCoordinates={refreshCoordinates}
+          />
+        )}
+
         {activeTab === 'prices' && <PricesTab prices={prices} refreshPrices={refreshPrices} />}
-        {activeTab === 'trading' && <TradingTab recommendations={recommendations} refreshRecommendations={refreshRecommendations} ocrStatus={ocrStatus} startOcr={startOcr} stopOcr={stopOcr} cities={cities} tradeGoods={tradeGoods} pendingTradeGoods={pendingTradeGoods} run={run} refreshCatalogs={refreshCatalogs} refreshPrices={refreshPrices} refreshPendingTradeGoods={refreshPendingTradeGoods} />}
-        {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} zones={zones} saveZone={saveZone} saveSetting={saveSetting} />}
+
+        {activeTab === 'trading' && (
+          <TradingTab
+            recommendations={recommendations}
+            refreshRecommendations={refreshRecommendations}
+            ocrStatus={ocrStatus}
+            startOcr={startOcr}
+            stopOcr={stopOcr}
+            cities={cities}
+            tradeGoods={tradeGoods}
+            pendingTradeGoods={pendingTradeGoods}
+            run={run}
+            refreshCatalogs={refreshCatalogs}
+            refreshPrices={refreshPrices}
+            refreshPendingTradeGoods={refreshPendingTradeGoods}
+          />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsTab
+            settings={settings}
+            setSettings={setSettings}
+            zones={zones}
+            saveZone={saveZone}
+            saveSetting={saveSetting}
+            run={run}
+          />
+        )}
       </main>
     </div>
   );
