@@ -1,9 +1,17 @@
 import React, { useState } from 'react';
-import { PackageSearch, TrendingUp } from 'lucide-react';
+import { PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
 import TradingGoodLookupTab from './TradingGoodLookupTab.jsx';
 import TradingDealAdvancedTab from './TradingDealAdvancedTab.jsx';
+import TradingOtherTab from './TradingOtherTab.jsx';
 
-export default function TradingTab({ cities, tradeGoods, latestCity, run, api }) {
+export default function TradingTab({
+  cities,
+  tradeGoods,
+  latestCity,
+  run,
+  api,
+  refreshCatalogs
+}) {
   const [activeSubTab, setActiveSubTab] = useState('goods');
 
   return (
@@ -26,6 +34,14 @@ export default function TradingTab({ cities, tradeGoods, latestCity, run, api })
             >
               <TrendingUp size={17} /> Deal helper
             </button>
+
+            <button
+              type="button"
+              className={activeSubTab === 'other' ? 'active' : ''}
+              onClick={() => setActiveSubTab('other')}
+            >
+              <PackagePlus size={17} /> Other
+            </button>
           </div>
         </div>
       </section>
@@ -47,6 +63,15 @@ export default function TradingTab({ cities, tradeGoods, latestCity, run, api })
           latestCity={latestCity}
           run={run}
           api={api}
+        />
+      )}
+
+      {activeSubTab === 'other' && (
+        <TradingOtherTab
+          tradeGoods={tradeGoods}
+          run={run}
+          api={api}
+          refreshCatalogs={refreshCatalogs}
         />
       )}
     </div>
