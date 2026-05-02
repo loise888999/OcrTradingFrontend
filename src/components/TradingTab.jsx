@@ -34,6 +34,7 @@ export default function TradingTab({ cities, tradeGoods, latestCity, run, api })
         <TradingGoodLookupTab
           cities={cities}
           tradeGoods={tradeGoods}
+          latestCity={latestCity}
           run={run}
           api={api}
         />
