@@ -1,4 +1,5 @@
 # OCR Trading Companion Frontend
+## Uncharted Water Online tool
 
 React/Vite frontend for the OCR Trading Companion app.
 
