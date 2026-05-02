@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ChevronDown,
+  ChevronUp,
   Eraser,
   Layers,
   MapPin,
-  PackageCheck,
   Route,
   Search,
+  SlidersHorizontal,
   Sparkles,
   TrendingUp
 } from 'lucide-react';
@@ -65,34 +67,73 @@ function freshnessTone(value) {
 }
 
 function pickBestRoute(routes) {
-  return [...routes].sort((a, b) => numberValue(b.profit) - numberValue(a.profit))[0] || null;
+  return [...routes]
+    .sort((a, b) => numberValue(b.profit) - numberValue(a.profit))[0] || null;
 }
 
 function pickBestMultiRoute(routes) {
-  return [...routes].sort((a, b) => numberValue(b.totalProfit) - numberValue(a.totalProfit))[0] || null;
+  return [...routes]
+    .sort((a, b) => numberValue(b.totalProfit) - numberValue(a.totalProfit))[0] || null;
 }
 
-function pickHighestSellPrice(rows) {
-  return [...rows]
-    .filter((row) => row.tradeType === 'Sell')
-    .sort((a, b) => numberValue(b.price) - numberValue(a.price))[0] || null;
-}
+function profitLabel(value) {
+  const profit = numberValue(value);
 
-function pickCheapestBuyPrice(rows) {
-  return [...rows]
-    .filter((row) => row.tradeType === 'Buy')
-    .sort((a, b) => numberValue(a.price) - numberValue(b.price))[0] || null;
+  if (profit >= 2000) return 'Excellent';
+  if (profit >= 800) return 'Good';
+  if (profit >= 250) return 'Okay';
+  return 'Low';
 }
 
 function getCurrentCityInfo(cities, latestCity) {
-  const currentName = sanitizeCityName(latestCity?.city);
-  if (!currentName) return { name: '', city: null };
+  const name = sanitizeCityName(latestCity?.city);
+  if (!name) return { name: '', city: null };
 
   const city = cities.find(
-    (item) => String(item.name || '').toLowerCase() === currentName.toLowerCase()
+    (item) => String(item.name || '').toLowerCase() === name.toLowerCase()
   );
 
-  return { name: currentName, city: city || null };
+  return { name, city: city || null };
+}
+
+function toggleValue(values, value) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
+}
+
+function RegionButtonGrid({ regions, selected, onChange }) {
+  return (
+    <div className="simple-region-grid">
+      {regions.map((region) => (
+        <button
+          key={region}
+          type="button"
+          className={`simple-region-button ${selected.includes(region) ? 'selected' : ''}`}
+          onClick={() => onChange(toggleValue(selected, region))}
+        >
+          {region}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PriceAgeBadge({ value }) {
+  const tone = freshnessTone(value);
+  return <span className={`price-age price-age-${tone}`}>{ageText(value)}</span>;
+}
+
+function SimpleResultCard({ title, icon, children, empty }) {
+  return (
+    <div className={`simple-result-card ${empty ? 'empty' : ''}`}>
+      <div className="simple-result-card-title">
+        {icon}
+        <strong>{title}</strong>
+      </div>
+      <div className="simple-result-card-body">{children}</div>
+    </div>
+  );
 }
 
 const emptyFilters = {
@@ -110,55 +151,47 @@ const emptyFilters = {
   minItems: 2
 };
 
-const helperModes = [
+const tradeStyles = [
   {
-    key: 'best',
-    title: 'Find best deals',
-    description: 'Load known prices, single routes, and multi-good routes together.'
+    key: 'inside',
+    title: 'Trade inside selected regions',
+    description: 'Buy and sell only inside the regions you selected.'
   },
   {
-    key: 'sell',
-    title: 'I already have goods',
-    description: 'Focus on where to sell for the highest known price.'
+    key: 'buyHere',
+    title: 'Buy here, sell anywhere',
+    description: 'Find goods to buy in selected regions and sell elsewhere.'
   },
   {
-    key: 'buy',
-    title: 'I want to buy goods',
-    description: 'Focus on cheap buy prices and profitable destinations.'
+    key: 'sellHere',
+    title: 'Bring goods here',
+    description: 'Find goods to buy anywhere and sell in selected regions.'
   },
   {
-    key: 'multi',
-    title: 'Multi-good route',
-    description: 'Find cities where several goods are profitable together.'
+    key: 'between',
+    title: 'Choose buy/sell regions',
+    description: 'Advanced simple mode: choose buy and sell regions separately.'
   }
 ];
 
-function SummaryCard({ title, icon, children, empty }) {
-  return (
-    <div className={`deal-summary-card ${empty ? 'empty' : ''}`}>
-      <div className="deal-summary-title">
-        {icon}
-        <strong>{title}</strong>
-      </div>
-      <div className="deal-summary-body">{children}</div>
-    </div>
-  );
-}
-
-function PriceAgeBadge({ value }) {
-  const tone = freshnessTone(value);
-  return <span className={`price-age price-age-${tone}`}>{ageText(value)}</span>;
-}
-
 export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity, run, api }) {
-  const [activeMode, setActiveMode] = useState('best');
+  const [mode, setMode] = useState('simple');
+
+  const [simpleRegions, setSimpleRegions] = useState([]);
+  const [simpleBuyRegions, setSimpleBuyRegions] = useState([]);
+  const [simpleSellRegions, setSimpleSellRegions] = useState([]);
+  const [simpleTradeStyle, setSimpleTradeStyle] = useState('inside');
+  const [simpleType, setSimpleType] = useState('');
+  const [simpleResultType, setSimpleResultType] = useState('both');
+  const [simpleLoading, setSimpleLoading] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+
   const [filters, setFilters] = useState({ ...emptyFilters });
   const [knownPrices, setKnownPrices] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [multiRoutes, setMultiRoutes] = useState([]);
   const [buyRegions, setBuyRegions] = useState([]);
   const [sellRegions, setSellRegions] = useState([]);
-  const [isLoadingBestDeals, setIsLoadingBestDeals] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
 
   const currentCityInfo = useMemo(
@@ -167,7 +200,9 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
   );
 
   const options = useMemo(() => {
-    const filtered = cities.filter((city) => !filters.mainRegion || city.mainRegion === filters.mainRegion);
+    const filtered = cities.filter(
+      (city) => !filters.mainRegion || city.mainRegion === filters.mainRegion
+    );
 
     return {
       types: uniqueSorted(tradeGoods.map((good) => good.type)),
@@ -182,8 +217,16 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
 
   const bestRoute = useMemo(() => pickBestRoute(routes), [routes]);
   const bestMultiRoute = useMemo(() => pickBestMultiRoute(multiRoutes), [multiRoutes]);
-  const highestSellPrice = useMemo(() => pickHighestSellPrice(knownPrices), [knownPrices]);
-  const cheapestBuyPrice = useMemo(() => pickCheapestBuyPrice(knownPrices), [knownPrices]);
+
+  const simpleRegionSummary = useMemo(() => {
+    if (simpleTradeStyle === 'between') {
+      const buyText = simpleBuyRegions.length ? simpleBuyRegions.join(', ') : 'Anywhere';
+      const sellText = simpleSellRegions.length ? simpleSellRegions.join(', ') : 'Anywhere';
+      return `Buy: ${buyText} → Sell: ${sellText}`;
+    }
+
+    return simpleRegions.length ? simpleRegions.join(', ') : 'Anywhere';
+  }, [simpleTradeStyle, simpleRegions, simpleBuyRegions, simpleSellRegions]);
 
   const update = (key, value) => {
     setFilters((current) => {
@@ -193,67 +236,134 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     });
   };
 
-  const updateMany = (values) => {
-    setFilters((current) => ({ ...current, ...values }));
+  const getSimpleRegionPayload = () => {
+    if (simpleTradeStyle === 'inside') {
+      return {
+        buyRegions: simpleRegions,
+        sellRegions: simpleRegions
+      };
+    }
+
+    if (simpleTradeStyle === 'buyHere') {
+      return {
+        buyRegions: simpleRegions,
+        sellRegions: []
+      };
+    }
+
+    if (simpleTradeStyle === 'sellHere') {
+      return {
+        buyRegions: [],
+        sellRegions: simpleRegions
+      };
+    }
+
+    return {
+      buyRegions: simpleBuyRegions,
+      sellRegions: simpleSellRegions
+    };
   };
 
-  const applyMode = (mode) => {
-    setActiveMode(mode);
+  const useCurrentMainRegion = () => {
+    const region = currentCityInfo.city?.mainRegion;
+    if (!region) return;
 
-    if (mode === 'sell') {
-      updateMany({ tradeType: 'Sell' });
+    if (simpleTradeStyle === 'between') {
+      setSimpleBuyRegions((current) => uniqueSorted([...current, region]));
+      return;
     }
 
-    if (mode === 'buy') {
-      updateMany({ tradeType: 'Buy' });
-    }
-
-    if (mode === 'multi') {
-      updateMany({
-        minProfitPerGood: Math.max(1, numberValue(filters.minProfitPerGood)),
-        minTotalProfit: Math.max(1, numberValue(filters.minTotalProfit)),
-        minItems: Math.max(2, numberValue(filters.minItems))
-      });
-    }
+    setSimpleRegions((current) => uniqueSorted([...current, region]));
   };
 
-  const clear = () => {
-    setActiveMode('best');
-    setFilters({ ...emptyFilters });
+  const useCurrentAsBuyRegion = () => {
+    const region = currentCityInfo.city?.mainRegion;
+    if (!region) return;
+    setSimpleTradeStyle('between');
+    setSimpleBuyRegions((current) => uniqueSorted([...current, region]));
+  };
+
+  const useCurrentAsSellRegion = () => {
+    const region = currentCityInfo.city?.mainRegion;
+    if (!region) return;
+    setSimpleTradeStyle('between');
+    setSimpleSellRegions((current) => uniqueSorted([...current, region]));
+  };
+
+  const findSimpleDeals = async () => {
+    const regionPayload = getSimpleRegionPayload();
+
+    setSimpleLoading(true);
+    setKnownPrices([]);
+
+    const shouldLoadSingle = simpleResultType === 'single' || simpleResultType === 'both';
+    const shouldLoadMulti = simpleResultType === 'multi' || simpleResultType === 'both';
+
+    const [singleResult, multiResult] = await Promise.all([
+      shouldLoadSingle
+        ? run(
+            () =>
+              api.getAdvancedRoutes({
+                item: '',
+                type: simpleType,
+                buyRegions: regionPayload.buyRegions,
+                sellRegions: regionPayload.sellRegions,
+                minProfit: 1,
+                routesPerItem: 10,
+                take: 50
+              }),
+            'Could not find simple trade routes'
+          )
+        : Promise.resolve([]),
+
+      shouldLoadMulti
+        ? run(
+            () =>
+              api.getMultiGoodRoutes({
+                type: simpleType,
+                buyRegions: regionPayload.buyRegions,
+                sellRegions: regionPayload.sellRegions,
+                minProfitPerGood: 1,
+                minTotalProfit: 1,
+                minItems: 2,
+                take: 25
+              }),
+            'Could not find simple multi-good routes'
+          )
+        : Promise.resolve([])
+    ]);
+
+    if (singleResult) setRoutes(singleResult);
+    if (multiResult) setMultiRoutes(multiResult);
+
+    setLastLoadedAt(new Date());
+    setSimpleLoading(false);
+  };
+
+  const clearSimple = () => {
+    setSimpleRegions([]);
+    setSimpleBuyRegions([]);
+    setSimpleSellRegions([]);
+    setSimpleTradeStyle('inside');
+    setSimpleType('');
+    setSimpleResultType('both');
     setKnownPrices([]);
     setRoutes([]);
     setMultiRoutes([]);
-    setBuyRegions([]);
-    setSellRegions([]);
     setLastLoadedAt(null);
   };
 
-  const useCurrentMainRegionAsBuyRegion = () => {
-    const region = currentCityInfo.city?.mainRegion;
-    if (!region) return;
-    setBuyRegions((current) => uniqueSorted([...current, region]));
-  };
-
-  const useCurrentMainRegionAsSellRegion = () => {
-    const region = currentCityInfo.city?.mainRegion;
-    if (!region) return;
-    setSellRegions((current) => uniqueSorted([...current, region]));
-  };
-
-  const useCurrentSubRegionAsBuyRegion = () => {
-    const region = currentCityInfo.city?.subRegion;
-    if (!region) return;
-    setBuyRegions((current) => uniqueSorted([...current, region]));
-  };
-
-  const useCurrentSubRegionAsSellRegion = () => {
-    const region = currentCityInfo.city?.subRegion;
-    if (!region) return;
-    setSellRegions((current) => uniqueSorted([...current, region]));
+  const clearAll = () => {
+    clearSimple();
+    setFilters({ ...emptyFilters });
+    setBuyRegions([]);
+    setSellRegions([]);
+    setShowDetails(false);
   };
 
   const loadKnownPrices = async () => {
     const data = await run(() => api.getKnownPrices(filters), 'Could not load known prices');
+
     if (data) {
       setKnownPrices(data);
       setLastLoadedAt(new Date());
@@ -284,9 +394,7 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     }
   };
 
-  const findBestDeals = async () => {
-    setIsLoadingBestDeals(true);
-
+  const findAdvancedDeals = async () => {
     const [known, singleRoutes, multiGoodRoutes] = await Promise.all([
       run(() => api.getKnownPrices(filters), 'Could not load known prices'),
       run(
@@ -314,7 +422,6 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     if (multiGoodRoutes) setMultiRoutes(multiGoodRoutes);
 
     setLastLoadedAt(new Date());
-    setIsLoadingBestDeals(false);
   };
 
   const knownPriceColumns = [
@@ -351,7 +458,11 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
       label: 'Profit',
       sortable: true,
       defaultDirection: 'desc',
-      render: (row) => <span className="good-text">+{row.profit}</span>
+      render: (row) => (
+        <span className="good-text">
+          +{row.profit} <small>({profitLabel(row.profit)})</small>
+        </span>
+      )
     }
   ];
 
@@ -364,7 +475,11 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
       label: 'Total Profit',
       sortable: true,
       defaultDirection: 'desc',
-      render: (row) => <span className="good-text">+{row.totalProfit}</span>
+      render: (row) => (
+        <span className="good-text">
+          +{row.totalProfit} <small>({profitLabel(row.totalProfit)})</small>
+        </span>
+      )
     },
     {
       key: 'items',
@@ -373,10 +488,14 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
       render: (row) => (
         <div className="multi-route-items">
           {(row.items || []).slice(0, 8).map((item) => (
-            <span key={`${row.buyCity}-${row.sellCity}-${item.itemName}`} className="mini-profit-chip">
+            <span
+              key={`${row.buyCity}-${row.sellCity}-${item.itemName}`}
+              className="mini-profit-chip"
+            >
               {item.itemName} +{item.profit}
             </span>
           ))}
+
           {(row.items || []).length > 8 && (
             <span className="mini-profit-chip muted-chip">
               +{row.items.length - 8} more
@@ -390,397 +509,540 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
   return (
     <div className="trade-subtab-stack">
       <section className="card">
-        <div className="card-body deal-helper">
-          <div className="deal-helper-header">
+        <div className="card-body simple-deal-helper">
+          <div className="simple-deal-header">
             <div>
               <h2>
                 <TrendingUp size={22} /> Deal helper
               </h2>
               <p className="muted">
-                Use this like a trading assistant: pick what you want to do, then let it find the best known deals.
+                Simple mode gives a quick answer. Advanced mode lets you control every filter.
               </p>
             </div>
 
-            <div className="current-city-box">
-              <span className="current-city-chip">
-                <MapPin size={16} />
-                Current city: {currentCityInfo.name || 'Unknown'}
-              </span>
-
-              {currentCityInfo.city && (
-                <small>
-                  {currentCityInfo.city.mainRegion} / {currentCityInfo.city.subRegion} / {currentCityInfo.city.seaTradeRegion}
-                </small>
-              )}
-            </div>
-          </div>
-
-          <div className="preset-grid">
-            {helperModes.map((mode) => (
+            <div className="deal-mode-toggle">
               <button
-                key={mode.key}
                 type="button"
-                className={`preset-card ${activeMode === mode.key ? 'active' : ''}`}
-                onClick={() => applyMode(mode.key)}
+                className={mode === 'simple' ? 'active' : ''}
+                onClick={() => setMode('simple')}
               >
-                <strong>{mode.title}</strong>
-                <small>{mode.description}</small>
+                Simple
               </button>
-            ))}
-          </div>
 
-          <div className="deal-summary-grid">
-            <SummaryCard title="Best single-good route" icon={<Route size={18} />} empty={!bestRoute}>
-              {bestRoute ? (
-                <>
-                  <strong>{bestRoute.itemName}</strong>
-                  <span>
-                    Buy in <b>{bestRoute.buyCity}</b> for {bestRoute.buyPrice}
-                  </span>
-                  <span>
-                    Sell in <b>{bestRoute.sellCity}</b> for {bestRoute.sellPrice}
-                  </span>
-                  <span className="summary-profit">Profit: +{bestRoute.profit}</span>
-                  <small>
-                    This is the highest single-good profit found with your current filters.
-                  </small>
-                </>
-              ) : (
-                <span>No single-good route loaded yet.</span>
-              )}
-            </SummaryCard>
-
-            <SummaryCard title="Best multi-good route" icon={<Layers size={18} />} empty={!bestMultiRoute}>
-              {bestMultiRoute ? (
-                <>
-                  <strong>
-                    {bestMultiRoute.buyCity} → {bestMultiRoute.sellCity}
-                  </strong>
-                  <span>{bestMultiRoute.itemCount} profitable goods</span>
-                  <span className="summary-profit">Total profit: +{bestMultiRoute.totalProfit}</span>
-                  <small>
-                    Best combined route when buying several goods in one city and selling them in another.
-                  </small>
-                </>
-              ) : (
-                <span>No multi-good route loaded yet.</span>
-              )}
-            </SummaryCard>
-
-            <SummaryCard title="Highest known sell price" icon={<Sparkles size={18} />} empty={!highestSellPrice}>
-              {highestSellPrice ? (
-                <>
-                  <strong>{highestSellPrice.itemName}</strong>
-                  <span>
-                    Sell in <b>{highestSellPrice.city}</b> for {highestSellPrice.price}
-                  </span>
-                  <span>
-                    {highestSellPrice.mainRegion} / {highestSellPrice.subRegion}
-                  </span>
-                  <PriceAgeBadge value={highestSellPrice.capturedAtUtc} />
-                </>
-              ) : (
-                <span>No sell price loaded yet.</span>
-              )}
-            </SummaryCard>
-
-            <SummaryCard title="Cheapest known buy price" icon={<PackageCheck size={18} />} empty={!cheapestBuyPrice}>
-              {cheapestBuyPrice ? (
-                <>
-                  <strong>{cheapestBuyPrice.itemName}</strong>
-                  <span>
-                    Buy in <b>{cheapestBuyPrice.city}</b> for {cheapestBuyPrice.price}
-                  </span>
-                  <span>
-                    {cheapestBuyPrice.mainRegion} / {cheapestBuyPrice.subRegion}
-                  </span>
-                  <PriceAgeBadge value={cheapestBuyPrice.capturedAtUtc} />
-                </>
-              ) : (
-                <span>No buy price loaded yet.</span>
-              )}
-            </SummaryCard>
-          </div>
-
-          <datalist id="deal-good-options">
-            {tradeGoods.map((good) => (
-              <option key={good.name} value={good.name}>
-                {good.type}
-              </option>
-            ))}
-          </datalist>
-
-          <datalist id="deal-type-options">
-            {options.types.map((type) => (
-              <option key={type} value={type} />
-            ))}
-          </datalist>
-
-          <datalist id="deal-main-region-options">
-            {options.mainRegions.map((region) => (
-              <option key={region} value={region} />
-            ))}
-          </datalist>
-
-          <datalist id="deal-sub-region-options">
-            {options.subRegions.map((region) => (
-              <option key={region} value={region} />
-            ))}
-          </datalist>
-
-          <datalist id="deal-sea-region-options">
-            {options.seaTradeRegions.map((region) => (
-              <option key={region} value={region} />
-            ))}
-          </datalist>
-
-          <div className="deal-filter-grid">
-            <label className="field">
-              <span>Good name</span>
-              <input
-                className="input"
-                list="deal-good-options"
-                value={filters.item}
-                onChange={(e) => update('item', e.target.value)}
-                placeholder="Optional good name..."
-              />
-            </label>
-
-            <label className="field">
-              <span>Good type</span>
-              <input
-                className="input"
-                list="deal-type-options"
-                value={filters.type}
-                onChange={(e) => update('type', e.target.value)}
-                placeholder="Optional type..."
-              />
-            </label>
-
-            <label className="field">
-              <span>Known price trade</span>
-              <select
-                className="input"
-                value={filters.tradeType}
-                onChange={(e) => update('tradeType', e.target.value)}
+              <button
+                type="button"
+                className={mode === 'advanced' ? 'active' : ''}
+                onClick={() => setMode('advanced')}
               >
-                <option>Sell</option>
-                <option>Buy</option>
-                <option>Any</option>
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Limit</span>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="1000"
-                value={filters.take}
-                onChange={(e) => update('take', Number(e.target.value || 250))}
-              />
-            </label>
-          </div>
-
-          <div className="region-panels">
-            <div className="region-panel">
-              <h4>Known price filter</h4>
-
-              <input
-                className="input"
-                list="deal-main-region-options"
-                placeholder="Main region"
-                value={filters.mainRegion}
-                onChange={(e) => update('mainRegion', e.target.value)}
-              />
-
-              <input
-                className="input"
-                list="deal-sub-region-options"
-                placeholder="Sub region"
-                value={filters.subRegion}
-                onChange={(e) => update('subRegion', e.target.value)}
-              />
-
-              <input
-                className="input"
-                list="deal-sea-region-options"
-                placeholder="Sea trade region"
-                value={filters.seaTradeRegion}
-                onChange={(e) => update('seaTradeRegion', e.target.value)}
-              />
-            </div>
-
-            <div className="region-panel">
-              <h4>Route profit rules</h4>
-
-              <input
-                className="input"
-                type="number"
-                min="1"
-                placeholder="Min profit"
-                value={filters.minProfit}
-                onChange={(e) => update('minProfit', Number(e.target.value || 1))}
-              />
-
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="100"
-                placeholder="Routes per good"
-                value={filters.routesPerItem}
-                onChange={(e) => update('routesPerItem', Number(e.target.value || 25))}
-              />
-            </div>
-
-            <div className="region-panel">
-              <h4>Multi-good route rules</h4>
-
-              <input
-                className="input"
-                type="number"
-                min="1"
-                placeholder="Min profit per good"
-                value={filters.minProfitPerGood}
-                onChange={(e) => update('minProfitPerGood', Number(e.target.value || 1))}
-              />
-
-              <input
-                className="input"
-                type="number"
-                min="1"
-                placeholder="Min total profit"
-                value={filters.minTotalProfit}
-                onChange={(e) => update('minTotalProfit', Number(e.target.value || 1))}
-              />
-
-              <input
-                className="input"
-                type="number"
-                min="2"
-                placeholder="Min goods"
-                value={filters.minItems}
-                onChange={(e) => update('minItems', Number(e.target.value || 2))}
-              />
+                Advanced
+              </button>
             </div>
           </div>
 
-          {currentCityInfo.city && (
-            <div className="current-region-actions">
-              <strong>Use current OCR city as context</strong>
+          <div className="current-city-strip">
+            <span className="current-city-chip">
+              <MapPin size={16} />
+              Current OCR city: {currentCityInfo.name || 'Unknown'}
+            </span>
 
-              <div className="quick-region-list">
-                <button type="button" className="region-chip" onClick={useCurrentMainRegionAsBuyRegion}>
-                  Buy from main region
+            {currentCityInfo.city && (
+              <>
+                <span className="muted">
+                  {currentCityInfo.city.mainRegion} / {currentCityInfo.city.subRegion} / {currentCityInfo.city.seaTradeRegion}
+                </span>
+
+                <button type="button" className="link-button" onClick={useCurrentMainRegion}>
+                  Use current region
                 </button>
 
-                <button type="button" className="region-chip" onClick={useCurrentSubRegionAsBuyRegion}>
-                  Buy from sub region
+                <button type="button" className="link-button" onClick={useCurrentAsBuyRegion}>
+                  Use as buy region
                 </button>
 
-                <button type="button" className="region-chip" onClick={useCurrentMainRegionAsSellRegion}>
-                  Sell to main region
+                <button type="button" className="link-button" onClick={useCurrentAsSellRegion}>
+                  Use as sell region
                 </button>
+              </>
+            )}
+          </div>
 
-                <button type="button" className="region-chip" onClick={useCurrentSubRegionAsSellRegion}>
-                  Sell to sub region
-                </button>
+          {mode === 'simple' && (
+            <div className="simple-mode-panel">
+              <div className="simple-step">
+                <div className="simple-step-title">
+                  <span>1</span>
+                  <div>
+                    <strong>Choose where you want to trade</strong>
+                    <small>Select one or more main regions. Leave empty to search everywhere.</small>
+                  </div>
+                </div>
+
+                {simpleTradeStyle !== 'between' ? (
+                  <RegionButtonGrid
+                    regions={options.mainRegions}
+                    selected={simpleRegions}
+                    onChange={setSimpleRegions}
+                  />
+                ) : (
+                  <div className="simple-between-grid">
+                    <div>
+                      <h4>Buy regions</h4>
+                      <RegionButtonGrid
+                        regions={options.mainRegions}
+                        selected={simpleBuyRegions}
+                        onChange={setSimpleBuyRegions}
+                      />
+                    </div>
+
+                    <div>
+                      <h4>Sell regions</h4>
+                      <RegionButtonGrid
+                        regions={options.mainRegions}
+                        selected={simpleSellRegions}
+                        onChange={setSimpleSellRegions}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="simple-step">
+                <div className="simple-step-title">
+                  <span>2</span>
+                  <div>
+                    <strong>Choose trade style</strong>
+                    <small>This controls how the selected regions are used.</small>
+                  </div>
+                </div>
+
+                <div className="trade-style-grid">
+                  {tradeStyles.map((style) => (
+                    <button
+                      key={style.key}
+                      type="button"
+                      className={`trade-style-card ${simpleTradeStyle === style.key ? 'active' : ''}`}
+                      onClick={() => setSimpleTradeStyle(style.key)}
+                    >
+                      <strong>{style.title}</strong>
+                      <small>{style.description}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="simple-step">
+                <div className="simple-step-title">
+                  <span>3</span>
+                  <div>
+                    <strong>Optional filters</strong>
+                    <small>Most users can leave these as default.</small>
+                  </div>
+                </div>
+
+                <div className="simple-options-grid">
+                  <label className="field">
+                    <span>Good type</span>
+                    <input
+                      className="input"
+                      list="simple-type-options"
+                      value={simpleType}
+                      onChange={(e) => setSimpleType(e.target.value)}
+                      placeholder="Any type"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Result type</span>
+                    <select
+                      className="input"
+                      value={simpleResultType}
+                      onChange={(e) => setSimpleResultType(e.target.value)}
+                    >
+                      <option value="both">Best single + multi-good</option>
+                      <option value="single">Single item only</option>
+                      <option value="multi">Multi-good only</option>
+                    </select>
+                  </label>
+                </div>
+
+                <datalist id="simple-type-options">
+                  {options.types.map((type) => (
+                    <option key={type} value={type} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="simple-search-box">
+                <div>
+                  <strong>Search summary</strong>
+                  <p className="muted">
+                    {simpleRegionSummary}
+                    {simpleType ? ` — Type: ${simpleType}` : ' — Any good type'}
+                  </p>
+                </div>
+
+                <div className="deal-actions">
+                  <button
+                    type="button"
+                    className="button button-primary big-action"
+                    onClick={findSimpleDeals}
+                    disabled={simpleLoading}
+                  >
+                    <Sparkles size={18} />
+                    {simpleLoading ? 'Finding best trade...' : 'Find Best Trade'}
+                  </button>
+
+                  <button type="button" className="button button-secondary" onClick={clearSimple}>
+                    <Eraser size={16} /> Clear
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          <div className="region-route-grid">
-            <MultiSelectChips
-              label="Buy regions — select many"
-              options={options.allRegions}
-              selected={buyRegions}
-              onChange={setBuyRegions}
-            />
+          {mode === 'advanced' && (
+            <div className="advanced-mode-panel">
+              <div className="advanced-mode-title">
+                <SlidersHorizontal size={18} />
+                <strong>Advanced filters</strong>
+                <span className="muted">Use these when you want exact control.</span>
+              </div>
 
-            <MultiSelectChips
-              label="Sell regions — select many"
-              options={options.allRegions}
-              selected={sellRegions}
-              onChange={setSellRegions}
-            />
-          </div>
+              <datalist id="deal-good-options">
+                {tradeGoods.map((good) => (
+                  <option key={good.name} value={good.name}>
+                    {good.type}
+                  </option>
+                ))}
+              </datalist>
 
-          <div className="deal-actions">
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={findBestDeals}
-              disabled={isLoadingBestDeals}
-            >
-              <Sparkles size={16} />
-              {isLoadingBestDeals ? 'Finding best deals...' : 'Find Best Deals'}
-            </button>
+              <datalist id="deal-type-options">
+                {options.types.map((type) => (
+                  <option key={type} value={type} />
+                ))}
+              </datalist>
 
-            <button type="button" className="button button-secondary" onClick={loadKnownPrices}>
-              <Search size={16} /> Known prices
-            </button>
+              <datalist id="deal-main-region-options">
+                {options.mainRegions.map((region) => (
+                  <option key={region} value={region} />
+                ))}
+              </datalist>
 
-            <button type="button" className="button button-secondary" onClick={findRoutes}>
-              <Route size={16} /> Single routes
-            </button>
+              <datalist id="deal-sub-region-options">
+                {options.subRegions.map((region) => (
+                  <option key={region} value={region} />
+                ))}
+              </datalist>
 
-            <button type="button" className="button button-success" onClick={findMultiRoutes}>
-              <Layers size={16} /> Multi-good routes
-            </button>
+              <datalist id="deal-sea-region-options">
+                {options.seaTradeRegions.map((region) => (
+                  <option key={region} value={region} />
+                ))}
+              </datalist>
 
-            <button type="button" className="button button-secondary" onClick={clear}>
-              <Eraser size={16} /> Clear
-            </button>
-          </div>
+              <div className="deal-filter-grid">
+                <label className="field">
+                  <span>Good name</span>
+                  <input
+                    className="input"
+                    list="deal-good-options"
+                    value={filters.item}
+                    onChange={(e) => update('item', e.target.value)}
+                    placeholder="Optional good name..."
+                  />
+                </label>
 
-          {lastLoadedAt && (
-            <p className="mini-info">
-              Last search: {lastLoadedAt.toLocaleString()}. Price freshness depends on when OCR captured each city.
-            </p>
+                <label className="field">
+                  <span>Good type</span>
+                  <input
+                    className="input"
+                    list="deal-type-options"
+                    value={filters.type}
+                    onChange={(e) => update('type', e.target.value)}
+                    placeholder="Optional type..."
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Known price trade</span>
+                  <select
+                    className="input"
+                    value={filters.tradeType}
+                    onChange={(e) => update('tradeType', e.target.value)}
+                  >
+                    <option>Sell</option>
+                    <option>Buy</option>
+                    <option>Any</option>
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Limit</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={filters.take}
+                    onChange={(e) => update('take', Number(e.target.value || 250))}
+                  />
+                </label>
+              </div>
+
+              <div className="region-panels">
+                <div className="region-panel">
+                  <h4>Known price filter</h4>
+
+                  <input
+                    className="input"
+                    list="deal-main-region-options"
+                    placeholder="Main region"
+                    value={filters.mainRegion}
+                    onChange={(e) => update('mainRegion', e.target.value)}
+                  />
+
+                  <input
+                    className="input"
+                    list="deal-sub-region-options"
+                    placeholder="Sub region"
+                    value={filters.subRegion}
+                    onChange={(e) => update('subRegion', e.target.value)}
+                  />
+
+                  <input
+                    className="input"
+                    list="deal-sea-region-options"
+                    placeholder="Sea trade region"
+                    value={filters.seaTradeRegion}
+                    onChange={(e) => update('seaTradeRegion', e.target.value)}
+                  />
+                </div>
+
+                <div className="region-panel">
+                  <h4>Route profit rules</h4>
+
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    placeholder="Min profit"
+                    value={filters.minProfit}
+                    onChange={(e) => update('minProfit', Number(e.target.value || 1))}
+                  />
+
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="100"
+                    placeholder="Routes per good"
+                    value={filters.routesPerItem}
+                    onChange={(e) => update('routesPerItem', Number(e.target.value || 25))}
+                  />
+                </div>
+
+                <div className="region-panel">
+                  <h4>Multi-good route rules</h4>
+
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    placeholder="Min profit per good"
+                    value={filters.minProfitPerGood}
+                    onChange={(e) => update('minProfitPerGood', Number(e.target.value || 1))}
+                  />
+
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    placeholder="Min total profit"
+                    value={filters.minTotalProfit}
+                    onChange={(e) => update('minTotalProfit', Number(e.target.value || 1))}
+                  />
+
+                  <input
+                    className="input"
+                    type="number"
+                    min="2"
+                    placeholder="Min goods"
+                    value={filters.minItems}
+                    onChange={(e) => update('minItems', Number(e.target.value || 2))}
+                  />
+                </div>
+              </div>
+
+              <div className="region-route-grid">
+                <MultiSelectChips
+                  label="Buy regions — select many"
+                  options={options.allRegions}
+                  selected={buyRegions}
+                  onChange={setBuyRegions}
+                />
+
+                <MultiSelectChips
+                  label="Sell regions — select many"
+                  options={options.allRegions}
+                  selected={sellRegions}
+                  onChange={setSellRegions}
+                />
+              </div>
+
+              <div className="deal-actions">
+                <button type="button" className="button button-primary" onClick={findAdvancedDeals}>
+                  <Sparkles size={16} /> Find Best Advanced Deals
+                </button>
+
+                <button type="button" className="button button-secondary" onClick={loadKnownPrices}>
+                  <Search size={16} /> Known prices
+                </button>
+
+                <button type="button" className="button button-secondary" onClick={findRoutes}>
+                  <Route size={16} /> Single routes
+                </button>
+
+                <button type="button" className="button button-success" onClick={findMultiRoutes}>
+                  <Layers size={16} /> Multi-good routes
+                </button>
+
+                <button type="button" className="button button-secondary" onClick={clearAll}>
+                  <Eraser size={16} /> Clear
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </section>
 
-      <section className="card">
-        <div className="card-body">
-          <h3>Known city prices</h3>
-          <SortableTable
-            columns={knownPriceColumns}
-            rows={knownPrices}
-            emptyMessage="No known prices loaded yet."
-            initialSortKey="price"
-            initialDirection="desc"
-          />
-        </div>
+      <section className="simple-results-layout">
+        <SimpleResultCard title="Best single-good route" icon={<Route size={18} />} empty={!bestRoute}>
+          {bestRoute ? (
+            <>
+              <strong>{bestRoute.itemName}</strong>
+
+              <span>
+                Buy in <b>{bestRoute.buyCity}</b> for {bestRoute.buyPrice}
+              </span>
+
+              <span>
+                Sell in <b>{bestRoute.sellCity}</b> for {bestRoute.sellPrice}
+              </span>
+
+              <span className="summary-profit">
+                Profit: +{bestRoute.profit} <small>{profitLabel(bestRoute.profit)}</small>
+              </span>
+
+              <small>
+                Best single item route found with your selected trade area.
+              </small>
+            </>
+          ) : (
+            <>
+              <span>No single-good result yet.</span>
+              <small>Choose a region and click Find Best Trade.</small>
+            </>
+          )}
+        </SimpleResultCard>
+
+        <SimpleResultCard title="Best multi-good route" icon={<Layers size={18} />} empty={!bestMultiRoute}>
+          {bestMultiRoute ? (
+            <>
+              <strong>
+                {bestMultiRoute.buyCity} → {bestMultiRoute.sellCity}
+              </strong>
+
+              <span>{bestMultiRoute.itemCount} profitable goods</span>
+
+              <span className="summary-profit">
+                Total profit: +{bestMultiRoute.totalProfit}{' '}
+                <small>{profitLabel(bestMultiRoute.totalProfit)}</small>
+              </span>
+
+              <div className="multi-route-items">
+                {(bestMultiRoute.items || []).slice(0, 6).map((item) => (
+                  <span key={item.itemName} className="mini-profit-chip">
+                    {item.itemName} +{item.profit}
+                  </span>
+                ))}
+              </div>
+
+              <small>
+                Best route for buying multiple goods in one city and selling them in another.
+              </small>
+            </>
+          ) : (
+            <>
+              <span>No multi-good result yet.</span>
+              <small>Choose a region and click Find Best Trade.</small>
+            </>
+          )}
+        </SimpleResultCard>
       </section>
 
       <section className="card">
-        <div className="card-body">
-          <h3>Single-good trade routes</h3>
-          <SortableTable
-            columns={routeColumns}
-            rows={routes}
-            emptyMessage="No route results yet."
-            initialSortKey="profit"
-            initialDirection="desc"
-          />
+        <div className="card-body detail-toggle-row">
+          <div>
+            <h3>Detailed results</h3>
+            <p className="muted">
+              Use this when you want to inspect all routes and known prices.
+              {lastLoadedAt ? ` Last search: ${lastLoadedAt.toLocaleString()}.` : ''}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => setShowDetails((value) => !value)}
+          >
+            {showDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {showDetails ? 'Hide details' : 'Show details'}
+          </button>
         </div>
       </section>
 
-      <section className="card">
-        <div className="card-body">
-          <h3>Multi-good route bonuses</h3>
-          <SortableTable
-            columns={multiColumns}
-            rows={multiRoutes}
-            emptyMessage="No multi-good routes yet."
-            initialSortKey="totalProfit"
-            initialDirection="desc"
-          />
-        </div>
-      </section>
+      {showDetails && (
+        <>
+          <section className="card">
+            <div className="card-body">
+              <h3>Single-good trade routes</h3>
+              <SortableTable
+                columns={routeColumns}
+                rows={routes}
+                emptyMessage="No route results yet."
+                initialSortKey="profit"
+                initialDirection="desc"
+              />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-body">
+              <h3>Multi-good route bonuses</h3>
+              <SortableTable
+                columns={multiColumns}
+                rows={multiRoutes}
+                emptyMessage="No multi-good routes yet."
+                initialSortKey="totalProfit"
+                initialDirection="desc"
+              />
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-body">
+              <h3>Known city prices</h3>
+              <SortableTable
+                columns={knownPriceColumns}
+                rows={knownPrices}
+                emptyMessage="No known prices loaded yet."
+                initialSortKey="price"
+                initialDirection="desc"
+              />
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }
