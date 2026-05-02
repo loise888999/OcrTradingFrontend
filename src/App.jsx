@@ -6,13 +6,10 @@ import {
   Crosshair,
   Download,
   Map,
-  Monitor,
   MousePointer2,
   Pause,
   Play,
   RefreshCw,
-  Route,
-  Search,
   Settings,
   ShoppingCart,
   SlidersHorizontal,
@@ -21,20 +18,21 @@ import {
   ZoomOut
 } from 'lucide-react';
 import { api } from './api';
-import AutocompleteInput from './components/AutocompleteInput.jsx';
 import AddTradeGoodPanel from './components/AddTradeGoodPanel.jsx';
 import ImportPricesCsvPanel from './components/ImportPricesCsvPanel.jsx';
 import PendingTradeGoodPanel from './components/PendingTradeGoodPanel.jsx';
 import GameWindowPanel from './components/GameWindowPanel.jsx';
+import OcrQuickControls from './components/OcrQuickControls.jsx';
+import TradingDealHelper from './components/TradingDealHelper.jsx';
 
 const DEFAULT_WORLD_WIDTH = 16384;
 const DEFAULT_WORLD_HEIGHT = 8192;
-const DEFAULT_X_ZERO_OFFSET = 0;
-const DEFAULT_WAYPOINT_OFFSET_X = 0;
-const DEFAULT_WAYPOINT_OFFSET_Y = 0;
+const DEFAULT_X_ZERO_OFFSET = 8192;
+const DEFAULT_WAYPOINT_OFFSET_X = 8192;
+const DEFAULT_WAYPOINT_OFFSET_Y = -620;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
-const MAP_IMAGE_URL = '/maps/world-map4.png';
+const MAP_IMAGE_URL = '/maps/world-map.png';
 
 const zoneNames = {
   coordinate: 'Coordinate',
@@ -85,17 +83,11 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   if (points.length < 2) return null;
 
   const recent = points.slice(-Math.max(2, sampleCount));
-  if (recent.length < 2) return null;
-
-  const unwrapped = [];
   let currentX = Number(recent[0].x);
-  unwrapped.push({ ...recent[0], unwrappedX: currentX, t: 0 });
+  const unwrapped = [{ ...recent[0], unwrappedX: currentX, t: 0 }];
 
   for (let i = 1; i < recent.length; i += 1) {
-    const previousRawX = Number(recent[i - 1].x);
-    const latestRawX = Number(recent[i].x);
-    const dx = unwrapDx(previousRawX, latestRawX, worldWidth);
-    currentX += dx;
+    currentX += unwrapDx(Number(recent[i - 1].x), Number(recent[i].x), worldWidth);
     unwrapped.push({ ...recent[i], unwrappedX: currentX, t: i });
   }
 
@@ -119,7 +111,6 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
 
   const dxPerStep = numeratorX / denominator;
   const dyPerStep = numeratorY / denominator;
-
   if (Math.abs(dxPerStep) < 0.001 && Math.abs(dyPerStep) < 0.001) return null;
 
   const latest = unwrapped[unwrapped.length - 1];
@@ -146,15 +137,8 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   const t = positive.length ? Math.min(...positive) : 1;
 
   return {
-    start: {
-      ...latest,
-      x: normalizeX(latestUnwrappedX, worldWidth),
-      y: clampY(latestY, worldHeight)
-    },
-    end: {
-      x: normalizeX(latestUnwrappedX + dxPerStep * t, worldWidth),
-      y: clampY(latestY + dyPerStep * t, worldHeight)
-    }
+    start: { ...latest, x: normalizeX(latestUnwrappedX, worldWidth), y: clampY(latestY, worldHeight) },
+    end: { x: normalizeX(latestUnwrappedX + dxPerStep * t, worldWidth), y: clampY(latestY + dyPerStep * t, worldHeight) }
   };
 }
 
@@ -198,7 +182,7 @@ function Toggle({ checked, onChange, label }) {
   );
 }
 
-function StatusBar({ backendStatus, ocrStatus, latestCity, error, onRefresh }) {
+function StatusBar({ backendStatus, ocrStatus, latestCity, error, onRefresh, startOcr, stopOcr, refreshStatus }) {
   const connected = backendStatus?.status === 'ok';
   const cityName = sanitizeCityName(latestCity?.city) || 'Unknown';
 
@@ -209,15 +193,18 @@ function StatusBar({ backendStatus, ocrStatus, latestCity, error, onRefresh }) {
           {connected ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           Backend {connected ? 'Connected' : 'Offline'}
         </Badge>
-        <Badge tone={ocrStatus?.enabled ? 'success' : 'muted'}>
-          <Activity size={14} /> OCR {ocrStatus?.enabled ? 'Running' : 'Stopped'}
-        </Badge>
         <Badge tone="info">City: {cityName}</Badge>
         <span className="api-url">API: {api.baseUrl}</span>
       </div>
       <div className="status-right">
         {error && <span className="error-text">{error}</span>}
-        <Button variant="secondary" onClick={onRefresh}><RefreshCw size={16} /> Refresh</Button>
+        <OcrQuickControls
+          ocrStatus={ocrStatus}
+          startOcr={startOcr}
+          stopOcr={stopOcr}
+          refreshStatus={refreshStatus || onRefresh}
+        />
+        <Button variant="secondary" onClick={onRefresh}><RefreshCw size={16} /> Refresh all</Button>
       </div>
     </Card>
   );
@@ -244,15 +231,8 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
     [coordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
   );
 
-  const rawSlopeLine = useMemo(
-    () => buildSlopeLine(coordinates, worldWidth, worldHeight, 12),
-    [coordinates, worldWidth, worldHeight]
-  );
-
-  const slopeLine = useMemo(
-    () => offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight),
-    [rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
-  );
+  const rawSlopeLine = useMemo(() => buildSlopeLine(coordinates, worldWidth, worldHeight, 12), [coordinates, worldWidth, worldHeight]);
+  const slopeLine = useMemo(() => offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight), [rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]);
 
   const current = coordinates[coordinates.length - 1];
   const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
@@ -312,19 +292,16 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
       const worldMouseY = (mouseY - currentPan.y) / currentZoom;
       const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
       const nextZoom = Math.max(0.018, Math.min(0.75, currentZoom * factor));
-      let nextPan;
 
-      if (keepCentered && displayCurrent) {
-        nextPan = {
+      const nextPan = keepCentered && displayCurrent
+        ? {
           x: normalizePanX(rect.width / 2 - displayCurrent.x * nextZoom, worldWidth, nextZoom),
           y: rect.height / 2 - displayCurrent.y * nextZoom
-        };
-      } else {
-        nextPan = {
+        }
+        : {
           x: normalizePanX(mouseX - worldMouseX * nextZoom, worldWidth, nextZoom),
           y: mouseY - worldMouseY * nextZoom
         };
-      }
 
       zoomRef.current = nextZoom;
       panRef.current = nextPan;
@@ -390,17 +367,15 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
       {showMovementTracking && slopeLine && (
         <line x1={slopeLine.start.x} y1={slopeLine.start.y} x2={slopeLine.end.x} y2={slopeLine.end.y} className="slope-line" />
       )}
-      {showMovementTracking
-        ? displayCoordinates.map((point, index) => (
-          <g key={`${offset}-${point.id || index}-${point.x}-${point.y}`}>
-            <circle cx={point.x} cy={point.y} r={index === displayCoordinates.length - 1 ? 18 : 12} className={index === displayCoordinates.length - 1 ? 'point current-point' : 'point'} />
-          </g>
-        ))
-        : displayCurrent && (
-          <g key={`${offset}-current-only-${displayCurrent.x}-${displayCurrent.y}`}>
-            <circle cx={displayCurrent.x} cy={displayCurrent.y} r="18" className="point current-point" />
-          </g>
-        )}
+      {(showMovementTracking ? displayCoordinates : displayCurrent ? [displayCurrent] : []).map((point, index, arr) => (
+        <circle
+          key={`${offset}-${point.id || index}-${point.x}-${point.y}`}
+          cx={point.x}
+          cy={point.y}
+          r={index === arr.length - 1 ? 18 : 12}
+          className={index === arr.length - 1 ? 'point current-point' : 'point'}
+        />
+      ))}
     </g>
   );
 
@@ -410,7 +385,7 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
         <div className="card-header dark-header compact-header">
           <div>
             <h2><Map size={22} /> Full Window Wrapped Map</h2>
-            <p>Drag to move. Mouse wheel zooms only this map. Slope uses a smoothed trend from recent coordinates.</p>
+            <p>Drag to move. Mouse wheel zooms only this map. Map dimensions are 16384 x 8192.</p>
           </div>
           <div className="map-controls">
             <div className="button-row">
@@ -438,8 +413,6 @@ function CoordinateMap({ coordinates, worldWidth, worldHeight, xZeroOffset, wayp
             <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
             <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
             <span>Zoom {(zoom * 100).toFixed(1)}%</span>
-            <span>Centered: {keepCentered ? 'On' : 'Off'} / Tracking: {showMovementTracking ? 'On' : 'Off'}</span>
-            <span>Waypoint offset X {waypointOffsetX} / Y {waypointOffsetY}</span>
           </div>
         </div>
       </Card>
@@ -488,119 +461,136 @@ function PricesTab({ prices, refreshPrices }) {
   );
 }
 
-function TradingTab({ recommendations, refreshRecommendations, ocrStatus, startOcr, stopOcr, cities, tradeGoods, pendingTradeGoods, run, refreshCatalogs, refreshPrices, refreshPendingTradeGoods }) {
-  const [filters, setFilters] = useState({ city: '', item: '', tradeType: 'Any', take: 250 });
+function ResultTable({ rows }) {
+  return (
+    <div className="table-wrap trade-results-table">
+      <table>
+        <thead><tr><th>City</th><th>Item</th><th>Type</th><th>Trade</th><th>Price</th><th>Multiplier</th><th>Captured</th></tr></thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan="7" className="empty-cell">No search results yet.</td></tr>}
+          {rows.map((row, index) => (
+            <tr key={`${row.city}-${row.itemName}-${row.tradeType}-${index}`}>
+              <td>{sanitizeCityName(row.city)}</td>
+              <td>{row.itemName}</td>
+              <td>{row.tradeGoodType}</td>
+              <td><Badge tone={row.tradeType === 'Buy' ? 'success' : row.tradeType === 'Sell' ? 'info' : 'muted'}>{row.tradeType}</Badge></td>
+              <td>{row.price}</td>
+              <td>{row.multiplier == null ? '' : `${Number(row.multiplier).toFixed(0)}%`}</td>
+              <td>{formatDate(row.capturedAtUtc)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecommendationsTable({ rows }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Type</th><th>Buy City</th><th>Buy Price</th><th>Sell City</th><th>Sell Price</th><th>Profit</th></tr></thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan="7" className="empty-cell">No recommendations yet.</td></tr>}
+          {rows.map((row, index) => (
+            <tr key={`${row.itemName}-${row.buyCity}-${row.sellCity}-${index}`}>
+              <td>{row.itemName}</td>
+              <td>{row.tradeGoodType}</td>
+              <td>{sanitizeCityName(row.buyCity)}</td>
+              <td>{row.buyPrice}</td>
+              <td>{sanitizeCityName(row.sellCity)}</td>
+              <td>{row.sellPrice}</td>
+              <td className="good-text">{row.profit}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TradingTab({ recommendations, refreshRecommendations, setRecommendations, latestCity, cities, tradeGoods, pendingTradeGoods, run, refreshCatalogs, refreshPrices, refreshPendingTradeGoods }) {
   const [results, setResults] = useState([]);
-  const [mode, setMode] = useState('search');
+  const [resultTitle, setResultTitle] = useState('Search results');
+  const [filters, setFilters] = useState({
+    city: '',
+    item: '',
+    tradeType: 'Any',
+    mainRegion: '',
+    subRegion: '',
+    seaTradeRegion: '',
+    buyMainRegion: '',
+    buySubRegion: '',
+    buySeaTradeRegion: '',
+    sellMainRegion: '',
+    sellSubRegion: '',
+    sellSeaTradeRegion: '',
+    take: 250
+  });
 
-  const update = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
-
-  const execute = async (nextMode = mode) => {
-    setMode(nextMode);
+  const execute = async (mode = 'search') => {
     let data = null;
-    if (nextMode === 'city') {
+
+    if (mode === 'city') {
       if (!filters.city) return;
-      data = await run(() => api.getCityGoods({ city: filters.city, tradeType: filters.tradeType, take: filters.take }), 'Could not load city goods');
-    } else if (nextMode === 'good') {
+      setResultTitle('Goods available in city');
+      data = await run(() => api.getCityGoods(filters), 'Could not load city goods');
+    } else if (mode === 'good') {
       if (!filters.item) return;
-      data = await run(() => api.getGoodLocations({ item: filters.item, tradeType: filters.tradeType, take: filters.take }), 'Could not load good locations');
+      setResultTitle('Locations for good');
+      data = await run(() => api.getGoodLocations(filters), 'Could not load good locations');
     } else {
+      setResultTitle('Search results');
       data = await run(() => api.searchTrading(filters), 'Could not search trading data');
     }
+
     if (data) setResults(data);
   };
 
-  const refreshAfterImport = async () => Promise.all([refreshPrices?.(), refreshRecommendations?.()]);
-  const refreshAfterPendingChange = async () => Promise.all([refreshPendingTradeGoods?.(), refreshCatalogs?.()]);
+  const runRecommendations = async (regionFilter = {}) => {
+    const data = await run(() => api.getRecommendations(regionFilter), 'Could not load recommendations');
+    if (data) setRecommendations(data);
+  };
 
   return (
     <div className="stack">
       <Card>
-        <div className="tab-header card-body">
-          <div>
-            <h2><TrendingUp size={24} /> Trading Options</h2>
-            <p className="muted">Search where to buy/sell goods, what goods are available in a city, or the best locations for one good.</p>
-          </div>
-          <div className="button-row">
-            {ocrStatus?.enabled ? <Button variant="warning" onClick={stopOcr}><Pause size={16} /> Stop OCR</Button> : <Button variant="success" onClick={startOcr}><Play size={16} /> Start OCR</Button>}
-            <a className="button button-secondary" href={api.exportPricesUrl()} target="_blank" rel="noreferrer"><Download size={16} /> Export CSV</a>
-          </div>
+        <div className="card-body">
+          <TradingDealHelper
+            cities={cities}
+            tradeGoods={tradeGoods}
+            filters={filters}
+            setFilters={setFilters}
+            latestCity={latestCity}
+            onSearch={execute}
+            onRecommendations={runRecommendations}
+          />
         </div>
       </Card>
 
-      <div className="trade-search-layout">
-        <Card>
-          <div className="card-body">
-            <h3><Search size={20} /> Trade Finder</h3>
-            <div className="filter-grid vertical-filter-grid">
-              <AutocompleteInput label="City" value={filters.city} onChange={(value) => update('city', value)} options={cities} placeholder="Type or choose a city..." getLabel={(city) => city.name} />
-              <AutocompleteInput label="Good" value={filters.item} onChange={(value) => update('item', value)} options={tradeGoods} placeholder="Type or choose a trade good..." getLabel={(good) => good.name} getSubLabel={(good) => good.type} />
-              <Field label="Trade type"><select className="input" value={filters.tradeType} onChange={(event) => update('tradeType', event.target.value)}><option>Any</option><option>Buy</option><option>Sell</option></select></Field>
-              <Field label="Limit"><input className="input" type="number" min="1" max="2000" value={filters.take} onChange={(event) => update('take', Number(event.target.value || 250))} /></Field>
-            </div>
-            <div className="button-row stacked-buttons">
-              <Button onClick={() => execute('search')}><Search size={16} /> Search all filters</Button>
-              <Button variant="secondary" onClick={() => execute('city')} disabled={!filters.city}>Goods in selected city</Button>
-              <Button variant="secondary" onClick={() => execute('good')} disabled={!filters.item}>Locations for selected good</Button>
-              <Button variant="secondary" onClick={refreshRecommendations}><Route size={16} /> Refresh best routes</Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="card-body">
-            <h3>{mode === 'city' ? 'Goods available in city' : mode === 'good' ? 'Locations for good' : 'Search results'}</h3>
-            <div className="table-wrap trade-results-table">
-              <table>
-                <thead><tr><th>City</th><th>Item</th><th>Type</th><th>Trade</th><th>Price</th><th>Multiplier</th><th>Captured</th></tr></thead>
-                <tbody>
-                  {results.length === 0 && <tr><td colSpan="7" className="empty-cell">No search results yet.</td></tr>}
-                  {results.map((row, index) => (
-                    <tr key={`${row.city}-${row.itemName}-${row.tradeType}-${index}`}>
-                      <td>{sanitizeCityName(row.city)}</td>
-                      <td>{row.itemName}</td>
-                      <td>{row.tradeGoodType}</td>
-                      <td><Badge tone={row.tradeType === 'Buy' ? 'success' : row.tradeType === 'Sell' ? 'info' : 'muted'}>{row.tradeType}</Badge></td>
-                      <td>{row.price}</td>
-                      <td>{row.multiplier == null ? '' : `${Number(row.multiplier).toFixed(0)}%`}</td>
-                      <td>{formatDate(row.capturedAtUtc)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Card>
-      </div>
+      <Card>
+        <div className="card-body">
+          <h3>{resultTitle}</h3>
+          <ResultTable rows={results} />
+        </div>
+      </Card>
 
       <Card>
         <div className="card-body">
-          <h3>Best profit route suggestions</h3>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Item</th><th>Type</th><th>Buy City</th><th>Buy Price</th><th>Sell City</th><th>Sell Price</th><th>Profit</th></tr></thead>
-              <tbody>
-                {recommendations.length === 0 && <tr><td colSpan="7" className="empty-cell">No recommendations yet.</td></tr>}
-                {recommendations.map((row, index) => (
-                  <tr key={`${row.itemName}-${index}`}>
-                    <td>{row.itemName}</td>
-                    <td>{row.tradeGoodType}</td>
-                    <td>{sanitizeCityName(row.buyCity)}</td>
-                    <td>{row.buyPrice}</td>
-                    <td>{sanitizeCityName(row.sellCity)}</td>
-                    <td>{row.sellPrice}</td>
-                    <td className="good-text">{row.profit}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="tab-header">
+            <div>
+              <h3><TrendingUp size={20} /> Best profit route suggestions</h3>
+              <p className="muted">Uses the deal helper region filters when you click Find best route.</p>
+            </div>
+            <Button variant="secondary" onClick={() => refreshRecommendations()}><RefreshCw size={16} /> Refresh default routes</Button>
           </div>
+          <RecommendationsTable rows={recommendations} />
         </div>
       </Card>
 
       <div className="bottom-trading-tools three-tools">
-        <Card><div className="card-body"><ImportPricesCsvPanel run={run} onImported={refreshAfterImport} /></div></Card>
-        <Card><div className="card-body"><PendingTradeGoodPanel candidates={pendingTradeGoods} tradeGoods={tradeGoods} run={run} onChanged={refreshAfterPendingChange} /></div></Card>
+        <Card><div className="card-body"><ImportPricesCsvPanel run={run} onImported={() => Promise.all([refreshPrices?.(), refreshRecommendations?.()])} /></div></Card>
+        <Card><div className="card-body"><PendingTradeGoodPanel candidates={pendingTradeGoods} tradeGoods={tradeGoods} run={run} onChanged={() => Promise.all([refreshPendingTradeGoods?.(), refreshCatalogs?.()])} /></div></Card>
         <Card><div className="card-body"><AddTradeGoodPanel run={run} onAdded={refreshCatalogs} tradeGoods={tradeGoods} /></div></Card>
       </div>
     </div>
@@ -633,7 +623,7 @@ function OcrZoneCard({ title, name, description, zone, onSave }) {
       const bottomRight = await api.getMousePosition();
       const updatedZone = { ...local, name, topLeftX: topLeft.x, topLeftY: topLeft.y, bottomRightX: bottomRight.x, bottomRightY: bottomRight.y };
       setLocal(updatedZone);
-      setCaptureStatus('Capture complete. Saving relative to game window if found...');
+      setCaptureStatus('Capture complete. Saving relative to selected game window if found...');
       await onSave(updatedZone);
       setCaptureStatus(`Saved. Top left: ${topLeft.x},${topLeft.y}. Bottom right: ${bottomRight.x},${bottomRight.y}.`);
     } catch (err) {
@@ -674,7 +664,7 @@ function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings, run 
       <Card className="dark-panel">
         <div className="card-body">
           <h2><Settings size={24} /> OCR + Map Settings</h2>
-          <p>OCR zones are saved relative to the detected game window after setup.</p>
+          <p>OCR zones are saved relative to the selected game window after setup.</p>
         </div>
       </Card>
 
@@ -705,9 +695,9 @@ function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings, run 
       </div>
 
       <div className="zone-cards">
-        <OcrZoneCard title="Coordinate OCR zone" name={zoneNames.coordinate} description="One-time setup. After saving, backend stores this zone relative to the detected game window." zone={getZone(zoneNames.coordinate)} onSave={saveZone} />
+        <OcrZoneCard title="Coordinate OCR zone" name={zoneNames.coordinate} description="One-time setup. Backend stores this zone relative to the selected game window." zone={getZone(zoneNames.coordinate)} onSave={saveZone} />
         <OcrZoneCard title="City OCR zone" name={zoneNames.city} description="One-time setup. Backend follows the game window after this is saved." zone={getZone(zoneNames.city)} onSave={saveZone} />
-        <OcrZoneCard title="Item price OCR zone" name={zoneNames.price} description="One-time setup for the trade-good/price area. Backend follows the game window after this is saved." zone={getZone(zoneNames.price)} onSave={saveZone} />
+        <OcrZoneCard title="Item price OCR zone" name={zoneNames.price} description="One-time setup for the trade-good/price area." zone={getZone(zoneNames.price)} onSave={saveZone} />
       </div>
     </div>
   );
@@ -765,8 +755,8 @@ export default function App() {
     if (data) setPrices(data);
   }, [run]);
 
-  const refreshRecommendations = useCallback(async () => {
-    const data = await run(() => api.getRecommendations(), 'Could not load recommendations');
+  const refreshRecommendations = useCallback(async (filters = {}) => {
+    const data = await run(() => api.getRecommendations(filters), 'Could not load recommendations');
     if (data) setRecommendations(data);
   }, [run]);
 
@@ -832,12 +822,21 @@ export default function App() {
       <header className="hero">
         <div>
           <h1>OCR Trading Companion</h1>
-          <p>Window-relative OCR zones, city whitelist OCR, trade-good filters, map tracking, price sharing, and route recommendations.</p>
+          <p>Window-relative OCR zones, OCR quick control, region trading helper, map tracking, price sharing, and route recommendations.</p>
         </div>
         <Badge tone="info">React + C# Backend</Badge>
       </header>
 
-      <StatusBar backendStatus={backendStatus} ocrStatus={ocrStatus} latestCity={latestCity} error={error} onRefresh={refreshAll} />
+      <StatusBar
+        backendStatus={backendStatus}
+        ocrStatus={ocrStatus}
+        latestCity={latestCity}
+        error={error}
+        onRefresh={refreshAll}
+        startOcr={startOcr}
+        stopOcr={stopOcr}
+        refreshStatus={refreshStatus}
+      />
 
       <nav className="tabs">
         <button className={activeTab === 'map' ? 'active' : ''} onClick={() => setActiveTab('map')}><Map size={17} /> Coordinate Map</button>
@@ -865,9 +864,8 @@ export default function App() {
           <TradingTab
             recommendations={recommendations}
             refreshRecommendations={refreshRecommendations}
-            ocrStatus={ocrStatus}
-            startOcr={startOcr}
-            stopOcr={stopOcr}
+            setRecommendations={setRecommendations}
+            latestCity={latestCity}
             cities={cities}
             tradeGoods={tradeGoods}
             pendingTradeGoods={pendingTradeGoods}

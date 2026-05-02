@@ -68,6 +68,49 @@ export const api = {
     request(`/api/trading/search?${params({ city, item, tradeType, take })}`),
   getCityGoods: ({ city, tradeType = 'Any', take = 250 }) =>
     request(`/api/trading/city-goods?${params({ city, tradeType, take })}`),
+
+  getMainRegions: () => request('/api/regions/main'),
+
+  getSubRegions: ({ mainRegion } = {}) =>
+    request(`/api/regions/sub?${params({ mainRegion })}`),
+
+  getSeaTradeRegions: ({ mainRegion, subRegion } = {}) =>
+    request(`/api/regions/sea-trade?${params({ mainRegion, subRegion })}`),
+
+  
+
+  searchTrading: ({ city, item, tradeType, mainRegion, subRegion, seaTradeRegion, take = 250 } = {}) =>
+    request(`/api/trading/search?${params({ city, item, tradeType, mainRegion, subRegion, seaTradeRegion, take })}`),
+
+  getCityGoods: ({ city, tradeType, mainRegion, subRegion, seaTradeRegion, take = 250 } = {}) =>
+    request(`/api/trading/city-goods?${params({ city, tradeType, mainRegion, subRegion, seaTradeRegion, take })}`),
+
+  getGoodLocations: ({ item, tradeType, mainRegion, subRegion, seaTradeRegion, take = 250 } = {}) =>
+    request(`/api/trading/good-locations?${params({ item, tradeType, mainRegion, subRegion, seaTradeRegion, take })}`),
+
+  getRecommendations: ({
+    mainRegion,
+    subRegion,
+    seaTradeRegion,
+    buyMainRegion,
+    buySubRegion,
+    buySeaTradeRegion,
+    sellMainRegion,
+    sellSubRegion,
+    sellSeaTradeRegion
+  } = {}) =>
+    request(`/api/trading/recommendations?${params({
+      mainRegion,
+      subRegion,
+      seaTradeRegion,
+      buyMainRegion,
+      buySubRegion,
+      buySeaTradeRegion,
+      sellMainRegion,
+      sellSubRegion,
+      sellSeaTradeRegion
+    })}`),
+
   getGoodLocations: ({ item, tradeType = 'Any', take = 250 }) =>
     request(`/api/trading/good-locations?${params({ item, tradeType, take })}`),
   getRecommendations: () => request('/api/trading/recommendations'),
