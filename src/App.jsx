@@ -28,13 +28,13 @@ import PendingTradeGoodPanel from './components/PendingTradeGoodPanel.jsx';
 import GameWindowPanel from './components/GameWindowPanel.jsx';
 
 const DEFAULT_WORLD_WIDTH = 16384;
-const DEFAULT_WORLD_HEIGHT = 7200;
+const DEFAULT_WORLD_HEIGHT = 8192;
 const DEFAULT_X_ZERO_OFFSET = 0;
 const DEFAULT_WAYPOINT_OFFSET_X = 0;
 const DEFAULT_WAYPOINT_OFFSET_Y = 0;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
-const MAP_IMAGE_URL = '/maps/world-map.png';
+const MAP_IMAGE_URL = '/maps/world-map4.png';
 
 const zoneNames = {
   coordinate: 'Coordinate',
