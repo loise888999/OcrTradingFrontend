@@ -332,6 +332,7 @@ export default function App() {
         )}
         {activeTab === 'prices' && <PricesTab prices={prices} refreshPrices={refreshPrices} />}
         {activeTab === 'trading' && <TradingTab cities={cities} tradeGoods={tradeGoods} run={run} api={api} />}
+        
         {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} zones={zones} saveZone={saveZone} saveSetting={saveSetting} run={run} />}
       </main>
     </div>
