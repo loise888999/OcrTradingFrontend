@@ -77,7 +77,33 @@ export const api = {
   getSeaTradeRegions: ({ mainRegion, subRegion } = {}) =>
     request(`/api/regions/sea-trade?${params({ mainRegion, subRegion })}`),
 
-  
+  lookupTradeGoods: ({ item, type, mainRegion, subRegion, take = 250 } = {}) =>
+  request(`/api/trading/good-lookup?${params({ item, type, mainRegion, subRegion, take })}`),
+
+getKnownPrices: ({ item, type, tradeType, mainRegion, subRegion, seaTradeRegion, take = 500 } = {}) =>
+  request(`/api/trading/known-prices?${params({ item, type, tradeType, mainRegion, subRegion, seaTradeRegion, take })}`),
+
+getAdvancedRoutes: ({ item, type, buyRegions = [], sellRegions = [], minProfit = 1, routesPerItem = 25, take = 100 } = {}) =>
+  request(`/api/trading/advanced-routes?${params({
+    item,
+    type,
+    buyRegions: buyRegions.join('|'),
+    sellRegions: sellRegions.join('|'),
+    minProfit,
+    routesPerItem,
+    take
+  })}`),
+
+getMultiGoodRoutes: ({ type, buyRegions = [], sellRegions = [], minProfitPerGood = 1, minTotalProfit = 1, minItems = 2, take = 100 } = {}) =>
+  request(`/api/trading/multi-good-routes?${params({
+    type,
+    buyRegions: buyRegions.join('|'),
+    sellRegions: sellRegions.join('|'),
+    minProfitPerGood,
+    minTotalProfit,
+    minItems,
+    take
+  })}`),
 
   searchTrading: ({ city, item, tradeType, mainRegion, subRegion, seaTradeRegion, take = 250 } = {}) =>
     request(`/api/trading/search?${params({ city, item, tradeType, mainRegion, subRegion, seaTradeRegion, take })}`),

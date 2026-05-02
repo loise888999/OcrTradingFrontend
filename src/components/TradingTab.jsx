@@ -1,0 +1,28 @@
+import React, { useState } from 'react';
+import { PackageSearch, TrendingUp } from 'lucide-react';
+import TradingGoodLookupTab from './TradingGoodLookupTab.jsx';
+import TradingDealAdvancedTab from './TradingDealAdvancedTab.jsx';
+
+export default function TradingTab({ cities, tradeGoods, run, api }) {
+  const [activeSubTab, setActiveSubTab] = useState('goods');
+
+  return (
+    <div className="stack">
+      <section className="card">
+        <div className="card-body">
+          <div className="trading-subtabs">
+            <button type="button" className={activeSubTab === 'goods' ? 'active' : ''} onClick={() => setActiveSubTab('goods')}>
+              <PackageSearch size={17} /> Find trade goods
+            </button>
+            <button type="button" className={activeSubTab === 'deals' ? 'active' : ''} onClick={() => setActiveSubTab('deals')}>
+              <TrendingUp size={17} /> Deal helper
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {activeSubTab === 'goods' && <TradingGoodLookupTab cities={cities} tradeGoods={tradeGoods} run={run} api={api} />}
+      {activeSubTab === 'deals' && <TradingDealAdvancedTab cities={cities} tradeGoods={tradeGoods} run={run} api={api} />}
+    </div>
+  );
+}
