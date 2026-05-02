@@ -150,12 +150,24 @@ function MainRegionPicker({ regions, selected, onChange }) {
   );
 }
 
-function groupBestOfferPerGood(rows) {
+function groupBestOfferPerGood(rows, tradeAction) {
   return Object.values(
     rows.reduce((acc, row) => {
       const key = row.itemName || row.item || 'Unknown';
 
-      if (!acc[key] || numberValue(row.price) < numberValue(acc[key].price)) {
+      if (!acc[key]) {
+        acc[key] = row;
+        return acc;
+      }
+
+      const currentPrice = numberValue(acc[key].price);
+      const nextPrice = numberValue(row.price);
+
+      if (tradeAction === 'buy' && nextPrice < currentPrice) {
+        acc[key] = row;
+      }
+
+      if (tradeAction === 'sell' && nextPrice > currentPrice) {
         acc[key] = row;
       }
 
@@ -164,12 +176,26 @@ function groupBestOfferPerGood(rows) {
   );
 }
 
-function buildSellLookup(sellRows) {
-  return sellRows.reduce((acc, row) => {
+function buildComparisonLookup(rows, tradeAction) {
+  return rows.reduce((acc, row) => {
     const key = String(row.itemName || '').toLowerCase();
     if (!key) return acc;
 
-    if (!acc[key] || numberValue(row.price) > numberValue(acc[key].price)) {
+    if (!acc[key]) {
+      acc[key] = row;
+      return acc;
+    }
+
+    const currentPrice = numberValue(acc[key].price);
+    const nextPrice = numberValue(row.price);
+
+    // If user wants to buy, comparison is best sell price, so highest sell.
+    if (tradeAction === 'buy' && nextPrice > currentPrice) {
+      acc[key] = row;
+    }
+
+    // If user wants to sell, comparison is best known buy price, so lowest buy.
+    if (tradeAction === 'sell' && nextPrice < currentPrice) {
       acc[key] = row;
     }
 
@@ -177,21 +203,32 @@ function buildSellLookup(sellRows) {
   }, {});
 }
 
-function sortRows(rows, sortMode) {
+function sortRows(rows, sortMode, tradeAction) {
   const sorted = [...rows];
 
   if (sortMode === 'closest') {
     return sorted.sort((a, b) => {
       const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
       if (distanceDiff !== 0) return distanceDiff;
-      return numberValue(a.price) - numberValue(b.price);
+
+      return tradeAction === 'buy'
+        ? numberValue(a.price) - numberValue(b.price)
+        : numberValue(b.price) - numberValue(a.price);
     });
   }
 
   if (sortMode === 'balanced') {
     return sorted.sort((a, b) => {
-      const aScore = numberValue(a.distanceScore) * 100000 + numberValue(a.price);
-      const bScore = numberValue(b.distanceScore) * 100000 + numberValue(b.price);
+      const aScore =
+        tradeAction === 'buy'
+          ? numberValue(a.distanceScore) * 100000 + numberValue(a.price)
+          : numberValue(a.distanceScore) * 100000 - numberValue(a.price);
+
+      const bScore =
+        tradeAction === 'buy'
+          ? numberValue(b.distanceScore) * 100000 + numberValue(b.price)
+          : numberValue(b.distanceScore) * 100000 - numberValue(b.price);
+
       return aScore - bScore;
     });
   }
@@ -200,31 +237,47 @@ function sortRows(rows, sortMode) {
     return sorted.sort((a, b) => {
       const profitDiff = numberValue(b.potentialProfit) - numberValue(a.potentialProfit);
       if (profitDiff !== 0) return profitDiff;
-      return numberValue(a.price) - numberValue(b.price);
+
+      return tradeAction === 'buy'
+        ? numberValue(a.price) - numberValue(b.price)
+        : numberValue(b.price) - numberValue(a.price);
     });
   }
 
-  return sorted.sort((a, b) => numberValue(a.price) - numberValue(b.price));
+  return tradeAction === 'buy'
+    ? sorted.sort((a, b) => numberValue(a.price) - numberValue(b.price))
+    : sorted.sort((a, b) => numberValue(b.price) - numberValue(a.price));
 }
 
-function getBestRows(rows) {
-  const cheapest = [...rows].sort((a, b) => numberValue(a.price) - numberValue(b.price))[0] || null;
+function getBestRows(rows, tradeAction) {
+  const bestPrice =
+    [...rows].sort((a, b) =>
+      tradeAction === 'buy'
+        ? numberValue(a.price) - numberValue(b.price)
+        : numberValue(b.price) - numberValue(a.price)
+    )[0] || null;
 
   const closest =
     [...rows].sort((a, b) => {
       const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
       if (distanceDiff !== 0) return distanceDiff;
-      return numberValue(a.price) - numberValue(b.price);
+
+      return tradeAction === 'buy'
+        ? numberValue(a.price) - numberValue(b.price)
+        : numberValue(b.price) - numberValue(a.price);
     })[0] || null;
 
   const profit =
     [...rows].sort((a, b) => {
       const profitDiff = numberValue(b.potentialProfit) - numberValue(a.potentialProfit);
       if (profitDiff !== 0) return profitDiff;
-      return numberValue(a.price) - numberValue(b.price);
+
+      return tradeAction === 'buy'
+        ? numberValue(a.price) - numberValue(b.price)
+        : numberValue(b.price) - numberValue(a.price);
     })[0] || null;
 
-  return { cheapest, closest, profit };
+  return { bestPrice, closest, profit };
 }
 
 const emptyAdvancedFilters = {
@@ -238,6 +291,7 @@ const emptyAdvancedFilters = {
 
 export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, run, api }) {
   const [mode, setMode] = useState('simple');
+  const [tradeAction, setTradeAction] = useState('buy');
 
   const [item, setItem] = useState('');
   const [type, setType] = useState('');
@@ -253,8 +307,8 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
   const [advancedFilters, setAdvancedFilters] = useState({ ...emptyAdvancedFilters });
 
   const [rows, setRows] = useState([]);
-  const [rawBuyRows, setRawBuyRows] = useState([]);
-  const [rawSellRows, setRawSellRows] = useState([]);
+  const [rawPrimaryRows, setRawPrimaryRows] = useState([]);
+  const [rawComparisonRows, setRawComparisonRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastSearchAt, setLastSearchAt] = useState(null);
 
@@ -287,7 +341,43 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     };
   }, [cities, tradeGoods, advancedFilters.mainRegion, advancedFilters.subRegion]);
 
-  const bestRows = useMemo(() => getBestRows(rows), [rows]);
+  const bestRows = useMemo(() => getBestRows(rows, tradeAction), [rows, tradeAction]);
+
+  const actionText = tradeAction === 'buy'
+    ? {
+        title: 'Find where to buy',
+        description: 'Find where to buy a good. Sort by cheapest, closest, balanced, or best potential profit.',
+        primaryTradeType: 'Buy',
+        comparisonTradeType: 'Sell',
+        priceLabel: 'Buy Price',
+        cityLabel: 'Buy City',
+        bestPriceTitle: 'Cheapest buy offer',
+        closestTitle: 'Closest buy offer',
+        profitTitle: 'Best potential profit',
+        showAllLabel: 'Show all buy offers',
+        noResultText: 'Search a good or region to load buy offers.',
+        actionVerb: 'Buy',
+        comparisonVerb: 'Sell',
+        comparisonColumn: 'Best Sell',
+        comparedText: 'known sell price'
+      }
+    : {
+        title: 'Find where to sell',
+        description: 'Find the best places to sell a good. Sort by highest price, closest, balanced, or best profit.',
+        primaryTradeType: 'Sell',
+        comparisonTradeType: 'Buy',
+        priceLabel: 'Sell Price',
+        cityLabel: 'Sell City',
+        bestPriceTitle: 'Highest sell offer',
+        closestTitle: 'Closest sell offer',
+        profitTitle: 'Best sell profit',
+        showAllLabel: 'Show all sell offers',
+        noResultText: 'Search a good or region to load sell offers.',
+        actionVerb: 'Sell',
+        comparisonVerb: 'Buy',
+        comparisonColumn: 'Best Buy',
+        comparedText: 'known buy price'
+      };
 
   const updateAdvanced = (key, value) => {
     setAdvancedFilters((current) => {
@@ -327,8 +417,8 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     setTake(500);
     setAdvancedFilters({ ...emptyAdvancedFilters });
     setRows([]);
-    setRawBuyRows([]);
-    setRawSellRows([]);
+    setRawPrimaryRows([]);
+    setRawComparisonRows([]);
     setLastSearchAt(null);
   };
 
@@ -354,22 +444,29 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     };
   };
 
-  const applyFrontendFiltersAndSorting = (buyRows, sellRows) => {
-    const sellLookup = buildSellLookup(sellRows);
+  const applyFrontendFiltersAndSorting = (primaryRows, comparisonRows) => {
+    const comparisonLookup = buildComparisonLookup(comparisonRows, tradeAction);
 
-    let enriched = buyRows.map((row) => {
-      const bestSell = sellLookup[String(row.itemName || '').toLowerCase()];
+    let enriched = primaryRows.map((row) => {
+      const comparison = comparisonLookup[String(row.itemName || '').toLowerCase()];
       const distanceScore = getDistanceScore(row, referenceCity);
+      const primaryPrice = numberValue(row.price);
+      const comparisonPrice = comparison ? numberValue(comparison.price) : null;
 
       return {
         ...row,
-        price: numberValue(row.price),
+        price: primaryPrice,
         distanceScore,
         distanceLabel: getDistanceLabel(distanceScore),
-        bestSellCity: bestSell?.city || '',
-        bestSellPrice: bestSell ? numberValue(bestSell.price) : null,
-        potentialProfit: bestSell ? numberValue(bestSell.price) - numberValue(row.price) : null,
-        bestSellCapturedAtUtc: bestSell?.capturedAtUtc || null
+        comparisonCity: comparison?.city || '',
+        comparisonPrice,
+        potentialProfit:
+          comparisonPrice === null
+            ? null
+            : tradeAction === 'buy'
+              ? comparisonPrice - primaryPrice
+              : primaryPrice - comparisonPrice,
+        comparisonCapturedAtUtc: comparison?.capturedAtUtc || null
       };
     });
 
@@ -382,10 +479,10 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     }
 
     if (!showAllOffers) {
-      enriched = groupBestOfferPerGood(enriched);
+      enriched = groupBestOfferPerGood(enriched, tradeAction);
     }
 
-    return sortRows(enriched, sortMode);
+    return sortRows(enriched, sortMode, tradeAction);
   };
 
   const search = async () => {
@@ -393,14 +490,14 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
 
     setLoading(true);
 
-    const [buyData, sellData] = await Promise.all([
+    const [primaryData, comparisonData] = await Promise.all([
       run(
         () =>
           api.getKnownPrices({
             ...payload,
-            tradeType: 'Buy'
+            tradeType: actionText.primaryTradeType
           }),
-        'Could not load buy offers'
+        `Could not load ${actionText.primaryTradeType.toLowerCase()} offers`
       ),
 
       includeProfit
@@ -409,20 +506,20 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               api.getKnownPrices({
                 item: payload.item,
                 type: payload.type,
-                tradeType: 'Sell',
+                tradeType: actionText.comparisonTradeType,
                 take: payload.take
               }),
-            'Could not load sell prices'
+            `Could not load ${actionText.comparisonTradeType.toLowerCase()} prices`
           )
         : Promise.resolve([])
     ]);
 
-    const buys = buyData || [];
-    const sells = sellData || [];
+    const primary = primaryData || [];
+    const comparison = comparisonData || [];
 
-    setRawBuyRows(buys);
-    setRawSellRows(sells);
-    setRows(applyFrontendFiltersAndSorting(buys, sells));
+    setRawPrimaryRows(primary);
+    setRawComparisonRows(comparison);
+    setRows(applyFrontendFiltersAndSorting(primary, comparison));
     setLastSearchAt(new Date());
     setLoading(false);
   };
@@ -432,12 +529,12 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     { key: 'tradeGoodType', label: 'Type', sortable: true },
     {
       key: 'price',
-      label: 'Buy Price',
+      label: actionText.priceLabel,
       sortable: true,
-      defaultDirection: 'asc',
+      defaultDirection: tradeAction === 'buy' ? 'asc' : 'desc',
       render: (row) => <strong>{row.price}</strong>
     },
-    { key: 'city', label: 'Buy City', sortable: true },
+    { key: 'city', label: actionText.cityLabel, sortable: true },
     { key: 'mainRegion', label: 'Main Region', sortable: true },
     { key: 'subRegion', label: 'Sub Region', sortable: true },
     { key: 'seaTradeRegion', label: 'Sea Trade', sortable: true },
@@ -468,13 +565,13 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
         )
     },
     {
-      key: 'bestSellCity',
-      label: 'Best Sell',
+      key: 'comparisonCity',
+      label: actionText.comparisonColumn,
       sortable: true,
       render: (row) =>
-        row.bestSellCity ? (
+        row.comparisonCity ? (
           <span>
-            {row.bestSellCity} / {row.bestSellPrice}
+            {row.comparisonCity} / {row.comparisonPrice}
           </span>
         ) : (
           <span className="muted">Unknown</span>
@@ -500,11 +597,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
           <div className="find-good-header">
             <div>
               <h2>
-                <PackageSearch size={22} /> Find trade goods
+                <PackageSearch size={22} /> Trade goods finder
               </h2>
-              <p className="muted">
-                Find where to buy a good. Sort by cheapest, closest, balanced, or best potential profit.
-              </p>
+              <p className="muted">{actionText.description}</p>
             </div>
 
             <div className="deal-mode-toggle">
@@ -524,6 +619,34 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                 Advanced
               </button>
             </div>
+          </div>
+
+          <div className="trade-action-toggle">
+            <button
+              type="button"
+              className={tradeAction === 'buy' ? 'active' : ''}
+              onClick={() => {
+                setTradeAction('buy');
+                setRows([]);
+                setRawPrimaryRows([]);
+                setRawComparisonRows([]);
+              }}
+            >
+              Find where to buy
+            </button>
+
+            <button
+              type="button"
+              className={tradeAction === 'sell' ? 'active' : ''}
+              onClick={() => {
+                setTradeAction('sell');
+                setRows([]);
+                setRawPrimaryRows([]);
+                setRawComparisonRows([]);
+              }}
+            >
+              Find where to sell
+            </button>
           </div>
 
           <div className="current-city-strip">
@@ -591,7 +714,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                   <span>1</span>
                   <div>
                     <strong>What good are you looking for?</strong>
-                    <small>You can search one good, a type, or leave it empty to browse all known buy offers.</small>
+                    <small>
+                      You can search one good, a type, or leave it empty to browse all known {actionText.primaryTradeType.toLowerCase()} offers.
+                    </small>
                   </div>
                 </div>
 
@@ -679,8 +804,12 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                       value={sortMode}
                       onChange={(e) => setSortMode(e.target.value)}
                     >
-                      <option value="balanced">Balanced: close + cheap</option>
-                      <option value="cheapest">Cheapest price</option>
+                      <option value="balanced">
+                        {tradeAction === 'buy' ? 'Balanced: close + cheap' : 'Balanced: close + high price'}
+                      </option>
+                      <option value="cheapest">
+                        {tradeAction === 'buy' ? 'Cheapest price' : 'Highest sell price'}
+                      </option>
                       <option value="closest">Closest location</option>
                       <option value="profit">Best potential profit</option>
                     </select>
@@ -706,7 +835,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                       checked={showAllOffers}
                       onChange={(e) => setShowAllOffers(e.target.checked)}
                     />
-                    Show all buy offers
+                    {actionText.showAllLabel}
                   </label>
 
                   <label>
@@ -816,8 +945,12 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                     value={sortMode}
                     onChange={(e) => setSortMode(e.target.value)}
                   >
-                    <option value="balanced">Balanced: close + cheap</option>
-                    <option value="cheapest">Cheapest price</option>
+                    <option value="balanced">
+                      {tradeAction === 'buy' ? 'Balanced: close + cheap' : 'Balanced: close + high price'}
+                    </option>
+                    <option value="cheapest">
+                      {tradeAction === 'buy' ? 'Cheapest price' : 'Highest sell price'}
+                    </option>
                     <option value="closest">Closest location</option>
                     <option value="profit">Best potential profit</option>
                   </select>
@@ -843,7 +976,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                     checked={showAllOffers}
                     onChange={(e) => setShowAllOffers(e.target.checked)}
                   />
-                  Show all buy offers
+                  {actionText.showAllLabel}
                 </label>
 
                 <label>
@@ -871,12 +1004,15 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
             <div>
               <strong>Search summary</strong>
               <p className="muted">
+                {actionText.title}
+                {' — '}
                 {mode === 'simple'
                   ? selectedMainRegions.length
-                    ? `Searching in: ${selectedMainRegions.join(', ')}`
+                    ? `Regions: ${selectedMainRegions.join(', ')}`
                     : 'Searching everywhere'
                   : 'Using advanced filters'}
-                {' '}— Sort: {sortMode}
+                {' — '}
+                Sort: {sortMode}
               </p>
             </div>
 
@@ -888,7 +1024,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                 disabled={loading}
               >
                 <Search size={17} />
-                {loading ? 'Searching...' : 'Find Goods'}
+                {loading ? 'Searching...' : actionText.title}
               </button>
 
               <button type="button" className="button button-secondary" onClick={clear}>
@@ -899,9 +1035,12 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
 
           {lastSearchAt && (
             <p className="mini-info">
-              Showing {rows.length} result{rows.length === 1 ? '' : 's'} from {rawBuyRows.length} known buy offer
-              {rawBuyRows.length === 1 ? '' : 's'}.
-              {includeProfit ? ` Compared with ${rawSellRows.length} known sell price${rawSellRows.length === 1 ? '' : 's'}.` : ''}
+              Showing {rows.length} result{rows.length === 1 ? '' : 's'} from {rawPrimaryRows.length} known{' '}
+              {actionText.primaryTradeType.toLowerCase()} offer
+              {rawPrimaryRows.length === 1 ? '' : 's'}.
+              {includeProfit
+                ? ` Compared with ${rawComparisonRows.length} ${actionText.comparedText}${rawComparisonRows.length === 1 ? '' : 's'}.`
+                : ''}
               {' '}Last search: {lastSearchAt.toLocaleString()}.
             </p>
           )}
@@ -909,32 +1048,32 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
       </section>
 
       <section className="find-good-results-grid">
-        <ResultCard title="Cheapest buy offer" icon={<Sparkles size={18} />} empty={!bestRows.cheapest}>
-          {bestRows.cheapest ? (
+        <ResultCard title={actionText.bestPriceTitle} icon={<Sparkles size={18} />} empty={!bestRows.bestPrice}>
+          {bestRows.bestPrice ? (
             <>
-              <strong>{bestRows.cheapest.itemName}</strong>
+              <strong>{bestRows.bestPrice.itemName}</strong>
               <span>
-                Buy in <b>{bestRows.cheapest.city}</b> for {bestRows.cheapest.price}
+                {actionText.actionVerb} in <b>{bestRows.bestPrice.city}</b> for {bestRows.bestPrice.price}
               </span>
               <span>
-                {bestRows.cheapest.mainRegion} / {bestRows.cheapest.subRegion}
+                {bestRows.bestPrice.mainRegion} / {bestRows.bestPrice.subRegion}
               </span>
-              <PriceAgeBadge value={bestRows.cheapest.capturedAtUtc} />
+              <PriceAgeBadge value={bestRows.bestPrice.capturedAtUtc} />
             </>
           ) : (
             <>
-              <span>No cheapest result yet.</span>
-              <small>Search a good or region to load buy offers.</small>
+              <span>No result yet.</span>
+              <small>{actionText.noResultText}</small>
             </>
           )}
         </ResultCard>
 
-        <ResultCard title="Closest useful offer" icon={<Compass size={18} />} empty={!bestRows.closest}>
+        <ResultCard title={actionText.closestTitle} icon={<Compass size={18} />} empty={!bestRows.closest}>
           {bestRows.closest ? (
             <>
               <strong>{bestRows.closest.itemName}</strong>
               <span>
-                Buy in <b>{bestRows.closest.city}</b> for {bestRows.closest.price}
+                {actionText.actionVerb} in <b>{bestRows.closest.city}</b> for {bestRows.closest.price}
               </span>
               <span className={`closeness-pill closeness-${bestRows.closest.distanceScore}`}>
                 {bestRows.closest.distanceLabel}
@@ -951,25 +1090,28 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
           )}
         </ResultCard>
 
-        <ResultCard title="Best potential profit" icon={<PackageSearch size={18} />} empty={!bestRows.profit}>
+        <ResultCard title={actionText.profitTitle} icon={<PackageSearch size={18} />} empty={!bestRows.profit}>
           {bestRows.profit ? (
             <>
               <strong>{bestRows.profit.itemName}</strong>
               <span>
-                Buy in <b>{bestRows.profit.city}</b> for {bestRows.profit.price}
+                {actionText.actionVerb} in <b>{bestRows.profit.city}</b> for {bestRows.profit.price}
               </span>
-              {bestRows.profit.bestSellCity ? (
+
+              {bestRows.profit.comparisonCity ? (
                 <>
                   <span>
-                    Sell in <b>{bestRows.profit.bestSellCity}</b> for {bestRows.profit.bestSellPrice}
+                    {actionText.comparisonVerb} reference:{' '}
+                    <b>{bestRows.profit.comparisonCity}</b> / {bestRows.profit.comparisonPrice}
                   </span>
+
                   <span className={bestRows.profit.potentialProfit > 0 ? 'summary-profit' : 'bad-text'}>
                     Potential profit: {bestRows.profit.potentialProfit > 0 ? '+' : ''}
                     {bestRows.profit.potentialProfit}
                   </span>
                 </>
               ) : (
-                <span className="muted">No sell price known yet</span>
+                <span className="muted">No comparison price known yet</span>
               )}
             </>
           ) : (
@@ -985,9 +1127,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
         <div className="card-body">
           <div className="tab-header">
             <div>
-              <h3>Buy offers</h3>
+              <h3>{actionText.primaryTradeType} offers</h3>
               <p className="muted">
-                This table can show all known buy offers, not only the lowest one.
+                This table can show all known {actionText.primaryTradeType.toLowerCase()} offers, not only the best one.
               </p>
             </div>
           </div>
@@ -995,9 +1137,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
           <SortableTable
             columns={columns}
             rows={rows}
-            emptyMessage="No buy offers found yet."
+            emptyMessage={`No ${actionText.primaryTradeType.toLowerCase()} offers found yet.`}
             initialSortKey={sortMode === 'closest' ? 'distanceScore' : sortMode === 'profit' ? 'potentialProfit' : 'price'}
-            initialDirection={sortMode === 'profit' ? 'desc' : 'asc'}
+            initialDirection={sortMode === 'profit' || tradeAction === 'sell' ? 'desc' : 'asc'}
           />
         </div>
       </section>
