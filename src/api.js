@@ -334,13 +334,30 @@ export const api = {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(
-        `${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`
-      );
+      throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
     }
 
     return response.json();
   },
 
-  exportPricesUrl: () => `${DEFAULT_API_BASE}/api/export/prices.csv`
+  exportPricesUrl: () => `${DEFAULT_API_BASE}/api/export/prices.csv`,
+
+  importTradeGoodsCsv: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${DEFAULT_API_BASE}/api/import/trade-goods.csv`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    return response.json();
+  },
+
+  exportTradeGoodsUrl: () => `${DEFAULT_API_BASE}/api/export/trade-goods.csv`
 };

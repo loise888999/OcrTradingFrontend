@@ -17,6 +17,7 @@ import OcrQuickControls from './components/OcrQuickControls.jsx';
 import TradingTab from './components/TradingTab.jsx';
 import SortableTable from './components/SortableTable.jsx';
 import WrappedCoordinateMap from './components/WrappedCoordinateMap.jsx';
+import DataSharingPanel from './components/DataSharingPanel.jsx';
 
 const DEFAULT_WORLD_WIDTH = 16384;
 const DEFAULT_WORLD_HEIGHT = 8192;
@@ -239,7 +240,16 @@ function OcrZoneCard({ title, name, description, zone, onSave }) {
   );
 }
 
-function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings, run }) {
+function SettingsTab({
+  settings,
+  zones,
+  saveZone,
+  saveSetting,
+  setSettings,
+  run,
+  refreshPrices,
+  refreshCatalogs
+}) {
   const getZone = (name) => zones.find((zone) => zone.name === name);
   const saveMapSetting = async (key, value) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -247,10 +257,27 @@ function SettingsTab({ settings, zones, saveZone, saveSetting, setSettings, run 
   };
 
   return (
-    <div className="stack">
-      <Card className="dark-panel"><div className="card-body"><h2><Settings size={24} /> OCR + Map Settings</h2><p>OCR zones are saved relative to the selected game window after setup.</p></div></Card>
-      <Card><div className="card-body"><GameWindowPanel run={run} /></div></Card>
-      <div className="settings-grid">
+  <div className="stack">
+    <Card className="dark-panel">
+      <div className="card-body">
+        <h2><Settings size={24} /> OCR + Map Settings</h2>
+        <p>OCR zones are saved relative to the selected game window after setup.</p>
+      </div>
+    </Card>
+
+    <Card>
+      <div className="card-body">
+        <GameWindowPanel run={run} />
+      </div>
+    </Card>
+
+    <DataSharingPanel
+      run={run}
+      refreshPrices={refreshPrices}
+      refreshCatalogs={refreshCatalogs}
+    />
+
+    <div className="settings-grid">
         <Card><div className="card-body"><h3><SlidersHorizontal size={20} /> Fine tune map</h3><Field label="World width / X wrap limit"><input className="input" type="number" value={settings.worldWidth} onChange={(e) => saveMapSetting('worldWidth', Number(e.target.value || DEFAULT_WORLD_WIDTH))} /></Field><Field label="World height / Y max"><input className="input" type="number" value={settings.worldHeight} onChange={(e) => saveMapSetting('worldHeight', Number(e.target.value || DEFAULT_WORLD_HEIGHT))} /></Field><Field label="Visual X=0 offset"><input className="input" type="number" value={settings.xZeroOffset} onChange={(e) => saveMapSetting('xZeroOffset', Number(e.target.value || DEFAULT_X_ZERO_OFFSET))} /></Field><Field label="Waypoint offset X"><input className="input" type="number" value={settings.waypointOffsetX} onChange={(e) => saveMapSetting('waypointOffsetX', Number(e.target.value || 0))} /></Field><Field label="Waypoint offset Y"><input className="input" type="number" value={settings.waypointOffsetY} onChange={(e) => saveMapSetting('waypointOffsetY', Number(e.target.value || 0))} /></Field></div></Card>
         <Card><div className="card-body"><h3><RefreshCw size={20} /> OCR timing</h3><Field label="Coordinate / main OCR interval"><input className="input" type="number" min="1" value={settings.ocrInterval} onChange={(e) => saveMapSetting('ocrInterval', Number(e.target.value || DEFAULT_OCR_INTERVAL))} /></Field><Field label="City OCR interval"><input className="input" type="number" min="1" value={settings.cityInterval} onChange={(e) => saveMapSetting('cityInterval', Number(e.target.value || DEFAULT_CITY_INTERVAL))} /></Field></div></Card>
       </div>
@@ -342,6 +369,7 @@ export default function App() {
           />
         )}
         {activeTab === 'settings' && <SettingsTab settings={settings} setSettings={setSettings} zones={zones} saveZone={saveZone} saveSetting={saveSetting} run={run} />}
+
       </main>
     </div>
   );
