@@ -313,6 +313,8 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
   const [citySearch, setCitySearch] = useState('');
   const [showUnplacedOnly, setShowUnplacedOnly] = useState(false);
+  const [showCityAdvanced, setShowCityAdvanced] = useState(false);
+  const [showRegionAdvanced, setShowRegionAdvanced] = useState(false);
 
   const [regions, setRegions] = useState([]);
   const [regionForm, setRegionForm] = useState(emptyRegionForm());
@@ -324,7 +326,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     height: MAP_PIXEL_HEIGHT
   });
 
-  const [error, setError] = useState('');
   const [saveNotice, setSaveNotice] = useState(null);
 
   viewBoxRef.current = viewBox;
@@ -390,7 +391,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   );
 
   const loadRegions = async () => {
-    setError('');
     const data = await run(() => api.getMapRegions(), 'Could not load map regions');
 
     if (data) setRegions(data);
@@ -621,8 +621,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     const point = screenToMapPoint(event.clientX, event.clientY);
     if (!point) return;
 
-    setError('');
-
     if (mode === 'city') {
       const wasExistingCity = Boolean(cityFormRef.current.originalName);
 
@@ -696,13 +694,12 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
   const saveCityForm = async (formToSave = cityFormRef.current, { auto = false } = {}) => {
     if (!auto) {
-        setError('');
     }
 
     const payload = buildCityPayload(formToSave);
 
     if (!payload.name) {
-      if (!auto) setError('City name is required.');
+      if (!auto) showSaveNotice('City name is required.', 'danger');
       return false;
     }
 
@@ -826,10 +823,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const deleteCity = async () => {
-    setError('');
 
     if (!cityForm.originalName) {
-      setError('Select an existing city first.');
+      showSaveNotice('Select an existing city first.', 'danger');
       return;
     }
 
@@ -878,12 +874,11 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const saveRegion = async () => {
-    setError('');
 
     const payload = buildRegionPayload(regionForm);
 
     if (!payload.name) {
-      setError('Region name is required.');
+      showSaveNotice('Region name is required.', 'danger');
       return;
     }
 
@@ -901,10 +896,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const deleteRegion = async () => {
-    setError('');
 
     if (!regionForm.id) {
-      setError('Select an existing region first.');
+      showSaveNotice('Select an existing region first.', 'danger');
       return;
     }
 
@@ -972,6 +966,11 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       ? null
       : nearestWrappedX(cityForm.mapPixelX, viewBox.x + viewBox.width / 2);
 
+  const selectedCityLabel = cityForm.name || cityForm.originalName || 'No city selected';
+  const selectedCityHasLocation = cityForm.mapPixelX !== '' && cityForm.mapPixelY !== '';
+  const regionPointCount = regionForm.points.length;
+  const activeRegionLabel = regionForm.name || 'No region selected';
+
   return (
     <section className="card">
       <div className="card-body map-editor-panel">
@@ -1005,12 +1004,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
         </div>
 
         <MapClickHelp mode={mode} zoomLevel={zoomLevel} />
-
-        {error && (
-          <div className="danger-info mini-info">
-            <strong>{error}</strong>
-          </div>
-        )}
 
         {saveNotice && (
           <div
@@ -1054,13 +1047,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
             {placedCities.length} placed / {unplacedCities.length} unplaced
           </span>
         </div>
-
-        {cityHasUnsavedChanges && (
-          <div className="warning-info mini-info">
-            <strong>Moved city not saved yet</strong>
-            <p>Click another city or click the moved city dot again to save the new position.</p>
-          </div>
-        )}
 
         <div className="map-editor-layout">
           <div className="map-editor-map-wrap">
@@ -1242,17 +1228,50 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
           <aside className="map-editor-side">
             {mode === 'city' && (
-              <div className="map-editor-form">
-                <h3>City editor</h3>
+              <div className="map-editor-form map-editor-compact-form">
+                <div className="map-editor-form-header">
+                  <div>
+                    <h3>City editor</h3>
+                    <p className="muted">
+                      Select a city, click the map to move it, then save from the top.
+                    </p>
+                  </div>
 
-                <div className="warning-info mini-info">
-                  <strong>
-                    <MousePointerClick size={16} /> Finding unplaced cities
-                  </strong>
-                  <p>
-                    Enable <b>Only unplaced cities</b>, choose a city, then click the map to place it.
-                    A new dot appears immediately before saving.
-                  </p>
+                  <span className={selectedCityHasLocation ? 'badge badge-success' : 'badge badge-muted'}>
+                    {selectedCityHasLocation ? 'Placed' : 'Unplaced'}
+                  </span>
+                </div>
+
+                <div className="map-editor-action-bar">
+                  <button type="button" className="button button-primary" onClick={saveCity}>
+                    <Save size={16} /> Save city
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={async () => {
+                      const saved = await autoSaveMovedCity();
+                      if (!saved) return;
+
+                      clearCityDirty();
+                      const empty = emptyCityForm();
+                      cityFormRef.current = empty;
+                      setCityForm(empty);
+                      showSaveNotice('Ready to add a new city.', 'info');
+                    }}
+                  >
+                    <Plus size={16} /> New
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={deleteCity}
+                    disabled={!cityForm.originalName}
+                  >
+                    <Trash2 size={16} /> Delete
+                  </button>
                 </div>
 
                 <datalist id="map-editor-city-options">
@@ -1279,13 +1298,39 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                   ))}
                 </datalist>
 
-                <label className="inline-checkbox">
+                <div className="map-editor-quick-grid">
+                  <label className="field">
+                    <span>Select city</span>
+                    <input
+                      className="input"
+                      list="map-editor-city-options"
+                      value={cityForm.originalName}
+                      onChange={async (event) => {
+                        await selectCityAfterAutoSave(event.target.value);
+                      }}
+                      placeholder="Choose a city..."
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Search markers</span>
+                    <input
+                      className="input"
+                      value={citySearch}
+                      onChange={(event) => setCitySearch(event.target.value)}
+                      placeholder="City or region..."
+                    />
+                  </label>
+                </div>
+
+                <label className="inline-checkbox map-editor-checkbox-line">
                   <input
                     type="checkbox"
                     checked={showUnplacedOnly}
                     onChange={(event) => setShowUnplacedOnly(event.target.checked)}
                   />
                   Only unplaced cities
+                  <span className="muted">({unplacedCities.length})</span>
                 </label>
 
                 {showUnplacedOnly && (
@@ -1309,32 +1354,8 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                         );
                       })}
                     </select>
-                    <small>{unplacedCities.length} cities do not have coordinates yet.</small>
                   </label>
                 )}
-
-                <label className="field">
-                  <span>Select existing city</span>
-                  <input
-                    className="input"
-                    list="map-editor-city-options"
-                    value={cityForm.originalName}
-                    onChange={async (event) => {
-                      await selectCityAfterAutoSave(event.target.value);
-                    }}
-                    placeholder="Choose a city..."
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Filter map city markers</span>
-                  <input
-                    className="input"
-                    value={citySearch}
-                    onChange={(event) => setCitySearch(event.target.value)}
-                    placeholder="Search city/region..."
-                  />
-                </label>
 
                 <label className="field">
                   <span>City name</span>
@@ -1342,153 +1363,180 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     className="input"
                     value={cityForm.name}
                     onChange={(event) => setCityForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Example: Lisbon"
                   />
                 </label>
 
-                <label className="field">
-                  <span>Aliases</span>
-                  <input
-                    className="input"
-                    value={cityForm.aliases}
-                    onChange={(event) => setCityForm((current) => ({ ...current, aliases: event.target.value }))}
-                    placeholder="Use | between aliases"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Main region</span>
-                  <input
-                    className="input"
-                    list="map-editor-main-region-options"
-                    value={cityForm.mainRegion}
-                    onChange={(event) => setCityForm((current) => ({ ...current, mainRegion: event.target.value }))}
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Sub region</span>
-                  <input
-                    className="input"
-                    list="map-editor-sub-region-options"
-                    value={cityForm.subRegion}
-                    onChange={(event) => setCityForm((current) => ({ ...current, subRegion: event.target.value }))}
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Sea trade region</span>
-                  <input
-                    className="input"
-                    list="map-editor-sea-region-options"
-                    value={cityForm.seaTradeRegion}
-                    onChange={(event) => setCityForm((current) => ({ ...current, seaTradeRegion: event.target.value }))}
-                  />
-                </label>
-
-                <div className="map-editor-coordinate-grid">
-                  <label className="field">
-                    <span>Map pixel X</span>
-                    <input
-                      className="input"
-                      type="number"
-                      value={cityForm.mapPixelX}
-                      onChange={(event) => {
-                        const raw = event.target.value;
-                        const normalized = raw === '' ? '' : Math.round(normalizeMapX(Number(raw)));
-
-                        const updated = {
-                          ...cityFormRef.current,
-                          mapPixelX: normalized,
-                          worldX: normalized === '' ? '' : mapToWorld(normalized)
-                        };
-
-                        const wasExistingCity = Boolean(cityFormRef.current.originalName);
-                        cityFormRef.current = updated;
-                        setCityForm(updated);
-
-                        if (wasExistingCity) {
-                          markCityDirty();
-                        }
-                      }}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Map pixel Y</span>
-                    <input
-                      className="input"
-                      type="number"
-                      value={cityForm.mapPixelY}
-                      onChange={(event) => {
-                        const raw = event.target.value;
-                        const value = raw === '' ? '' : Math.round(clamp(Number(raw), 0, MAP_PIXEL_HEIGHT));
-
-                        const updated = {
-                          ...cityFormRef.current,
-                          mapPixelY: value,
-                          worldY: value === '' ? '' : mapToWorld(value)
-                        };
-
-                        const wasExistingCity = Boolean(cityFormRef.current.originalName);
-                        cityFormRef.current = updated;
-                        setCityForm(updated);
-
-                        if (wasExistingCity) {
-                          markCityDirty();
-                        }
-                      }}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>World X</span>
-                    <input className="input" readOnly value={cityForm.worldX} />
-                  </label>
-
-                  <label className="field">
-                    <span>World Y</span>
-                    <input className="input" readOnly value={cityForm.worldY} />
-                  </label>
+                <div className="map-editor-location-summary">
+                  <strong>{selectedCityLabel}</strong>
+                  <span>
+                    {selectedCityHasLocation
+                      ? `Map ${cityForm.mapPixelX}, ${cityForm.mapPixelY} · World ${cityForm.worldX}, ${cityForm.worldY}`
+                      : 'No map position yet. Click on the map to place it.'}
+                  </span>
                 </div>
 
-                <div className="deal-actions">
-                  <button type="button" className="button button-primary" onClick={saveCity}>
-                    <Save size={16} /> Save city
+                <button
+                  type="button"
+                  className="map-editor-collapse-button"
+                  onClick={() => setShowCityAdvanced((current) => !current)}
+                >
+                  {showCityAdvanced ? 'Hide advanced city fields' : 'Show advanced city fields'}
+                </button>
+
+                {showCityAdvanced && (
+                  <div className="map-editor-advanced-panel">
+                    <label className="field">
+                      <span>Aliases</span>
+                      <input
+                        className="input"
+                        value={cityForm.aliases}
+                        onChange={(event) => setCityForm((current) => ({ ...current, aliases: event.target.value }))}
+                        placeholder="Use | between aliases"
+                      />
+                    </label>
+
+                    <div className="map-editor-quick-grid">
+                      <label className="field">
+                        <span>Main region</span>
+                        <input
+                          className="input"
+                          list="map-editor-main-region-options"
+                          value={cityForm.mainRegion}
+                          onChange={(event) => setCityForm((current) => ({ ...current, mainRegion: event.target.value }))}
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>Sub region</span>
+                        <input
+                          className="input"
+                          list="map-editor-sub-region-options"
+                          value={cityForm.subRegion}
+                          onChange={(event) => setCityForm((current) => ({ ...current, subRegion: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+
+                    <label className="field">
+                      <span>Sea trade region</span>
+                      <input
+                        className="input"
+                        list="map-editor-sea-region-options"
+                        value={cityForm.seaTradeRegion}
+                        onChange={(event) => setCityForm((current) => ({ ...current, seaTradeRegion: event.target.value }))}
+                      />
+                    </label>
+
+                    <div className="map-editor-coordinate-grid">
+                      <label className="field">
+                        <span>Map pixel X</span>
+                        <input
+                          className="input"
+                          type="number"
+                          value={cityForm.mapPixelX}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            const normalized = raw === '' ? '' : Math.round(normalizeMapX(Number(raw)));
+
+                            const updated = {
+                              ...cityFormRef.current,
+                              mapPixelX: normalized,
+                              worldX: normalized === '' ? '' : mapToWorld(normalized)
+                            };
+
+                            const wasExistingCity = Boolean(cityFormRef.current.originalName);
+                            cityFormRef.current = updated;
+                            setCityForm(updated);
+
+                            if (wasExistingCity) {
+                              markCityDirty();
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>Map pixel Y</span>
+                        <input
+                          className="input"
+                          type="number"
+                          value={cityForm.mapPixelY}
+                          onChange={(event) => {
+                            const raw = event.target.value;
+                            const value = raw === '' ? '' : Math.round(clamp(Number(raw), 0, MAP_PIXEL_HEIGHT));
+
+                            const updated = {
+                              ...cityFormRef.current,
+                              mapPixelY: value,
+                              worldY: value === '' ? '' : mapToWorld(value)
+                            };
+
+                            const wasExistingCity = Boolean(cityFormRef.current.originalName);
+                            cityFormRef.current = updated;
+                            setCityForm(updated);
+
+                            if (wasExistingCity) {
+                              markCityDirty();
+                            }
+                          }}
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span>World X</span>
+                        <input className="input" readOnly value={cityForm.worldX} />
+                      </label>
+
+                      <label className="field">
+                        <span>World Y</span>
+                        <input className="input" readOnly value={cityForm.worldY} />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mode === 'region' && (
+              <div className="map-editor-form map-editor-compact-form">
+                <div className="map-editor-form-header">
+                  <div>
+                    <h3>Region editor</h3>
+                    <p className="muted">
+                      Draw any shape. Right-click on the map to remove the last point.
+                    </p>
+                  </div>
+
+                  <span className="badge badge-info">
+                    {regionPointCount} point{regionPointCount === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                <div className="map-editor-action-bar">
+                  <button type="button" className="button button-primary" onClick={saveRegion}>
+                    <Save size={16} /> Save region
                   </button>
 
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={async () => {
-                      const saved = await autoSaveMovedCity();
-                      if (!saved) return;
-
-                      clearCityDirty();
-                      const empty = emptyCityForm();
-                      cityFormRef.current = empty;
-                      setCityForm(empty);
+                    onClick={() => {
+                      setRegionForm(emptyRegionForm());
+                      showSaveNotice('Ready to draw a new region.', 'info');
                     }}
                   >
-                    <Plus size={16} /> New city
+                    <Plus size={16} /> New
                   </button>
 
-                  <button type="button" className="button button-secondary" onClick={deleteCity} disabled={!cityForm.originalName}>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={deleteRegion}
+                    disabled={!regionForm.id}
+                  >
                     <Trash2 size={16} /> Delete
                   </button>
-                </div>
-              </div>
-            )}
-
-            {mode === 'region' && (
-              <div className="map-editor-form">
-                <h3>Region editor</h3>
-
-                <div className="success-info mini-info">
-                  <strong>Editable default regions</strong>
-                  <p>
-                    Pick an official region such as <b>Europe</b>, draw or edit its polygon, and save it.
-                    This changes the visual region shape without removing your city region fields.
-                  </p>
                 </div>
 
                 <datalist id="map-editor-region-options">
@@ -1517,20 +1565,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                       </option>
                     ))}
                   </select>
-                  <small>
-                    This lets you create a polygon for default regions like Europe, Adriatic, or Western Mediterranean.
-                  </small>
-                </label>
-
-                <label className="field">
-                  <span>Select existing drawn region</span>
-                  <input
-                    className="input"
-                    list="map-editor-region-options"
-                    value={regionForm.id}
-                    onChange={(event) => selectRegion(event.target.value)}
-                    placeholder="Choose a region id..."
-                  />
                 </label>
 
                 <label className="field">
@@ -1543,109 +1577,130 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                   />
                 </label>
 
-                <label className="field">
-                  <span>Region type</span>
-                  <select
-                    className="input"
-                    value={regionForm.type}
-                    onChange={(event) => setRegionForm((current) => ({ ...current, type: event.target.value }))}
-                  >
-                    <option value="MainRegion">MainRegion</option>
-                    <option value="SubRegion">SubRegion</option>
-                    <option value="SeaTradeRegion">SeaTradeRegion</option>
-                    <option value="Custom">Custom</option>
-                  </select>
-                </label>
-
-                <label className="field">
-                  <span>Parent region</span>
-                  <input
-                    className="input"
-                    value={regionForm.parentRegion}
-                    onChange={(event) => setRegionForm((current) => ({ ...current, parentRegion: event.target.value }))}
-                    placeholder="Optional"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Color</span>
-                  <input
-                    className="input"
-                    type="color"
-                    value={regionForm.color}
-                    onChange={(event) => setRegionForm((current) => ({ ...current, color: event.target.value }))}
-                  />
-                </label>
-
-                <label className="inline-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={regionForm.enabled}
-                    onChange={(event) => setRegionForm((current) => ({ ...current, enabled: event.target.checked }))}
-                  />
-                  Enabled
-                </label>
-
-                <div className="region-point-list">
-                  <div className="map-editor-mini-header">
-                    <strong>Polygon points</strong>
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => setRegionForm((current) => ({ ...current, points: [] }))}
+                <div className="map-editor-quick-grid">
+                  <label className="field">
+                    <span>Region type</span>
+                    <select
+                      className="input"
+                      value={regionForm.type}
+                      onChange={(event) => setRegionForm((current) => ({ ...current, type: event.target.value }))}
                     >
-                      Clear points
+                      <option value="MainRegion">MainRegion</option>
+                      <option value="SubRegion">SubRegion</option>
+                      <option value="SeaTradeRegion">SeaTradeRegion</option>
+                      <option value="Custom">Custom</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Color</span>
+                    <input
+                      className="input"
+                      type="color"
+                      value={regionForm.color}
+                      onChange={(event) => setRegionForm((current) => ({ ...current, color: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="map-editor-location-summary">
+                  <strong>{activeRegionLabel}</strong>
+                  <span>
+                    Click the map to add points. Right-click removes the last point. Save is always visible at the top.
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  className="map-editor-collapse-button"
+                  onClick={() => setShowRegionAdvanced((current) => !current)}
+                >
+                  {showRegionAdvanced ? 'Hide advanced region fields' : 'Show advanced region fields'}
+                </button>
+
+                {showRegionAdvanced && (
+                  <div className="map-editor-advanced-panel">
+                    <label className="field">
+                      <span>Select existing drawn region</span>
+                      <input
+                        className="input"
+                        list="map-editor-region-options"
+                        value={regionForm.id}
+                        onChange={(event) => selectRegion(event.target.value)}
+                        placeholder="Choose a region id..."
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Parent region</span>
+                      <input
+                        className="input"
+                        value={regionForm.parentRegion}
+                        onChange={(event) => setRegionForm((current) => ({ ...current, parentRegion: event.target.value }))}
+                        placeholder="Optional"
+                      />
+                    </label>
+
+                    <label className="inline-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={regionForm.enabled}
+                        onChange={(event) => setRegionForm((current) => ({ ...current, enabled: event.target.checked }))}
+                      />
+                      Enabled
+                    </label>
+
+                    <div className="region-point-list">
+                      <div className="map-editor-mini-header">
+                        <strong>Polygon points</strong>
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => {
+                            setRegionForm((current) => ({ ...current, points: [] }));
+                            showSaveNotice('Cleared region points.', 'info');
+                          }}
+                        >
+                          Clear points
+                        </button>
+                      </div>
+
+                      {regionForm.points.length === 0 && (
+                        <p className="muted">Click the map to add points. Drag the map to move around.</p>
+                      )}
+
+                      {regionForm.points.map((point, index) => (
+                        <div key={`${index}-${point.x ?? point.X}-${point.y ?? point.Y}`} className="region-point-row">
+                          <input
+                            className="input"
+                            type="number"
+                            value={point.x ?? point.X}
+                            onChange={(event) => updateRegionPoint(index, 'x', event.target.value)}
+                          />
+
+                          <input
+                            className="input"
+                            type="number"
+                            value={point.y ?? point.Y}
+                            onChange={(event) => updateRegionPoint(index, 'y', event.target.value)}
+                          />
+
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => removeRegionPoint(index)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button type="button" className="button button-secondary" onClick={loadRegions}>
+                      <RefreshCw size={16} /> Reload regions
                     </button>
                   </div>
-
-                  {regionForm.points.length === 0 && (
-                    <p className="muted">Click the map to add points. Drag the map to move around.</p>
-                  )}
-
-                  {regionForm.points.map((point, index) => (
-                    <div key={`${index}-${point.x ?? point.X}-${point.y ?? point.Y}`} className="region-point-row">
-                      <input
-                        className="input"
-                        type="number"
-                        value={point.x ?? point.X}
-                        onChange={(event) => updateRegionPoint(index, 'x', event.target.value)}
-                      />
-
-                      <input
-                        className="input"
-                        type="number"
-                        value={point.y ?? point.Y}
-                        onChange={(event) => updateRegionPoint(index, 'y', event.target.value)}
-                      />
-
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => removeRegionPoint(index)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="deal-actions">
-                  <button type="button" className="button button-primary" onClick={saveRegion}>
-                    <Save size={16} /> Save region
-                  </button>
-
-                  <button type="button" className="button button-secondary" onClick={() => setRegionForm(emptyRegionForm())}>
-                    <Plus size={16} /> New region
-                  </button>
-
-                  <button type="button" className="button button-secondary" onClick={deleteRegion} disabled={!regionForm.id}>
-                    <Trash2 size={16} /> Delete
-                  </button>
-
-                  <button type="button" className="button button-secondary" onClick={loadRegions}>
-                    <RefreshCw size={16} /> Reload
-                  </button>
-                </div>
+                )}
               </div>
             )}
           </aside>
