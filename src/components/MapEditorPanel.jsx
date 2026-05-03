@@ -97,7 +97,7 @@ function emptyRegionForm() {
   return {
     id: '',
     name: '',
-    type: 'Custom',
+    type: 'MainRegion',
     parentRegion: '',
     color: '#60a5fa',
     enabled: true,
@@ -111,7 +111,7 @@ function regionToForm(region) {
   return {
     id: region.id || region.Id || '',
     name: region.name || region.Name || '',
-    type: region.type || region.Type || 'Custom',
+    type: region.type || region.Type || 'MainRegion',
     parentRegion: region.parentRegion || region.ParentRegion || '',
     color: region.color || region.Color || '#60a5fa',
     enabled: region.enabled ?? region.Enabled ?? true,
@@ -282,12 +282,87 @@ function regionPointsToString(points) {
     .join(' ');
 }
 
+function polygonCenterX(points) {
+  const unwrapped = unwrapRegionPoints(points);
+  if (!unwrapped.length) return 0;
+
+  return unwrapped.reduce((sum, point) => sum + point.x, 0) / unwrapped.length;
+}
+
+function isPointInsidePolygon(point, polygonPoints) {
+  const polygon = unwrapRegionPoints(polygonPoints);
+  if (polygon.length < 3) return false;
+
+  const referenceX = polygonCenterX(polygon);
+  const x = nearestWrappedX(point.x, referenceX);
+  const y = point.y;
+
+  let inside = false;
+
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const currentPoint = polygon[current];
+    const previousPoint = polygon[previous];
+
+    const intersects =
+      currentPoint.y > y !== previousPoint.y > y &&
+      x <
+        ((previousPoint.x - currentPoint.x) * (y - currentPoint.y)) /
+          ((previousPoint.y - currentPoint.y) || Number.EPSILON) +
+          currentPoint.x;
+
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function getCityName(city) {
+  return city.name || city.Name || '';
+}
+
+function getCityAliases(city) {
+  return city.aliases || city.Aliases || [];
+}
+
+function getCityField(city, camel, pascal, fallback = '') {
+  return city[camel] ?? city[pascal] ?? fallback;
+}
+
+function buildCityUpdatePayload(city, overrides = {}) {
+  const mapPixelX = getCityField(city, 'mapPixelX', 'MapPixelX', null);
+  const mapPixelY = getCityField(city, 'mapPixelY', 'MapPixelY', null);
+
+  return {
+    name: overrides.name ?? getCityName(city),
+    aliases: overrides.aliases ?? getCityAliases(city),
+    mainRegion: overrides.mainRegion ?? getCityField(city, 'mainRegion', 'MainRegion', 'Unassigned'),
+    subRegion: overrides.subRegion ?? getCityField(city, 'subRegion', 'SubRegion', 'Unassigned'),
+    seaTradeRegion:
+      overrides.seaTradeRegion ?? getCityField(city, 'seaTradeRegion', 'SeaTradeRegion', 'Unassigned'),
+    mapPixelX: overrides.mapPixelX ?? (mapPixelX === '' ? null : mapPixelX),
+    mapPixelY: overrides.mapPixelY ?? (mapPixelY === '' ? null : mapPixelY),
+    worldX: overrides.worldX ?? getCityField(city, 'worldX', 'WorldX', null),
+    worldY: overrides.worldY ?? getCityField(city, 'worldY', 'WorldY', null)
+  };
+}
+
+function regionFieldForType(type) {
+  if (type === 'MainRegion') return 'mainRegion';
+  if (type === 'SubRegion') return 'subRegion';
+  if (type === 'SeaTradeRegion') return 'seaTradeRegion';
+  return null;
+}
+
+function isEditableRegionType(type) {
+  return type === 'MainRegion' || type === 'SubRegion' || type === 'SeaTradeRegion';
+}
+
 function MapClickHelp({ mode, zoomLevel }) {
   return (
     <p className="mini-info">
       {mode === 'city'
         ? 'City mode: use Find city to load a city, then click the map to place or move it. Choosing an exact city from the dropdown opens it automatically.'
-        : 'Region mode: click the map to add polygon points. Each point links to the next one, even across the wrap seam. Right-click removes the last point.'}
+        : 'Region mode: click the map to add points. Right-click removes the last point. Saving applies the region to cities inside the polygon.'}
       {' '}
       The map wraps horizontally. Current editor zoom: {zoomLevel.toFixed(1)}x.
     </p>
@@ -297,6 +372,7 @@ function MapClickHelp({ mode, zoomLevel }) {
 export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);
+  const rightClickUndoRef = useRef(0);
   const viewBoxRef = useRef(null);
 
   const [svgSize, setSvgSize] = useState({
@@ -566,7 +642,39 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewBox]);
 
+  const removeLastRegionPoint = () => {
+    if (!regionForm.points.length) {
+      showSaveNotice('No region point to remove.', 'info');
+      return false;
+    }
+
+    const nextPointCount = Math.max(0, regionForm.points.length - 1);
+
+    setRegionForm((current) => ({
+      ...current,
+      points: current.points.slice(0, -1)
+    }));
+
+    showSaveNotice(
+      `Removed last region point. ${nextPointCount} point${nextPointCount === 1 ? '' : 's'} remaining.`,
+      'info'
+    );
+
+    return true;
+  };
+
   const onMapMouseDown = (event) => {
+    if (event.button === 2 && mode === 'region') {
+      event.preventDefault();
+      event.stopPropagation();
+
+      rightClickUndoRef.current = Date.now();
+      dragRef.current = null;
+      removeLastRegionPoint();
+
+      return;
+    }
+
     if (event.button !== 0) return;
 
     event.preventDefault();
@@ -610,6 +718,8 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const onMapMouseUp = (event) => {
+    if (event.button !== 0) return;
+
     const drag = dragRef.current;
     dragRef.current = null;
 
@@ -670,22 +780,12 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
     dragRef.current = null;
 
-    if (!regionForm.points.length) {
-      showSaveNotice('No region point to remove.', 'info');
-      return;
-    }
+    // Most browsers fire contextmenu after mouse down.
+    // If mouse down already removed the point, do not remove a second point.
+    if (Date.now() - rightClickUndoRef.current < 350) return;
 
-    const nextPointCount = Math.max(0, regionForm.points.length - 1);
-
-    setRegionForm((current) => ({
-      ...current,
-      points: current.points.slice(0, -1)
-    }));
-
-    showSaveNotice(
-      `Removed last region point. ${nextPointCount} point${nextPointCount === 1 ? '' : 's'} remaining.`,
-      'info'
-    );
+    rightClickUndoRef.current = Date.now();
+    removeLastRegionPoint();
   };
 
   const onMapMouseLeave = () => {
@@ -910,6 +1010,112 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     }));
   };
 
+  const applyRegionToCities = async (regionPayload) => {
+    const regionType = regionPayload.type;
+    const field = regionFieldForType(regionType);
+    const regionName = String(regionPayload.name || '').trim();
+
+    if (!field || !regionName) {
+      return { assigned: 0, cleared: 0, skipped: 0, failed: 0 };
+    }
+
+    const points = regionPayload.points || [];
+    const hasPolygon = points.length >= 3;
+
+    let assigned = 0;
+    let cleared = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const city of cities) {
+      const name = getCityName(city);
+      if (!name) {
+        skipped += 1;
+        continue;
+      }
+
+      const coord = getCityCoord(city);
+      const currentValue = String(getCityField(city, field, field[0].toUpperCase() + field.slice(1), '')).trim();
+
+      const inside = hasPolygon && coord ? isPointInsidePolygon(coord, points) : false;
+      const nextValue = inside ? regionName : currentValue === regionName ? 'Unassigned' : currentValue;
+
+      if (nextValue === currentValue) {
+        skipped += 1;
+        continue;
+      }
+
+      const payload = buildCityUpdatePayload(city, {
+        [field]: nextValue
+      });
+
+      if (inside && regionPayload.parentRegion) {
+        if (regionType === 'SubRegion') {
+          payload.mainRegion = regionPayload.parentRegion;
+        }
+
+        if (regionType === 'SeaTradeRegion') {
+          payload.subRegion = regionPayload.parentRegion;
+        }
+      }
+
+      const result = await run(
+        () => api.updateCity(name, payload),
+        `Could not update city region for ${name}`
+      );
+
+      if (result) {
+        if (inside) assigned += 1;
+        else cleared += 1;
+      } else {
+        failed += 1;
+      }
+    }
+
+    return { assigned, cleared, skipped, failed };
+  };
+
+  const clearRegionFromCities = async (regionName, regionType) => {
+    const field = regionFieldForType(regionType);
+
+    if (!field || !regionName) {
+      return { cleared: 0, skipped: 0, failed: 0 };
+    }
+
+    let cleared = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const city of cities) {
+      const name = getCityName(city);
+      if (!name) {
+        skipped += 1;
+        continue;
+      }
+
+      const currentValue = String(getCityField(city, field, field[0].toUpperCase() + field.slice(1), '')).trim();
+
+      if (currentValue !== regionName) {
+        skipped += 1;
+        continue;
+      }
+
+      const payload = buildCityUpdatePayload(city, {
+        [field]: 'Unassigned'
+      });
+
+      const result = await run(
+        () => api.updateCity(name, payload),
+        `Could not clear city region for ${name}`
+      );
+
+      if (result) cleared += 1;
+      else failed += 1;
+    }
+
+    return { cleared, skipped, failed };
+  };
+
   const saveRegion = async () => {
     const payload = buildRegionPayload(regionForm);
 
@@ -918,32 +1124,63 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       return;
     }
 
+    if (!isEditableRegionType(payload.type)) {
+      showSaveNotice('Choose MainRegion, SubRegion, or SeaTradeRegion before saving.', 'danger');
+      return;
+    }
+
+    if (!payload.points || payload.points.length < 3) {
+      showSaveNotice('A region needs at least 3 points before it can be applied to cities.', 'danger');
+      return;
+    }
+
     const result = regionForm.id
       ? await run(() => api.updateMapRegion(regionForm.id, payload), 'Could not update region')
       : await run(() => api.addMapRegion(payload), 'Could not add region');
 
     if (result) {
-      const successMessage = normalizeApiResult(result);
-      showSaveNotice(successMessage);
+      const savedRegion = result.region || result.Region || payload;
+      const normalizedRegion = buildRegionPayload(regionToForm(savedRegion));
+      const cityResult = await applyRegionToCities(normalizedRegion);
 
-      setRegionForm(regionToForm(result.region || result.Region || payload));
+      showSaveNotice(
+        `${normalizeApiResult(result)} Applied to ${cityResult.assigned} city/cities and cleared ${cityResult.cleared}.`,
+        cityResult.failed ? 'danger' : 'success'
+      );
+
+      setRegionForm(regionToForm(savedRegion));
       await loadRegions();
+
+      if (refreshCatalogs) await refreshCatalogs();
     }
   };
 
   const deleteRegion = async () => {
-    if (!regionForm.id) {
-      showSaveNotice('Select an existing region first.', 'danger');
+    const regionName = String(regionForm.name || '').trim();
+    const regionType = regionForm.type;
+
+    if (!regionName || !isEditableRegionType(regionType)) {
+      showSaveNotice('Select or name a MainRegion, SubRegion, or SeaTradeRegion first.', 'danger');
       return;
     }
 
-    const result = await run(() => api.deleteMapRegion(regionForm.id), 'Could not delete region');
+    const cityResult = await clearRegionFromCities(regionName, regionType);
 
-    if (result) {
-      showSaveNotice(normalizeApiResult(result));
-      setRegionForm(emptyRegionForm());
-      await loadRegions();
+    if (regionForm.id) {
+      const result = await run(() => api.deleteMapRegion(regionForm.id), 'Could not delete region');
+
+      if (!result) return;
     }
+
+    showSaveNotice(
+      `Deleted ${regionType} '${regionName}'. Cleared ${cityResult.cleared} city/cities.`,
+      cityResult.failed ? 'danger' : 'success'
+    );
+
+    setRegionForm(emptyRegionForm());
+    await loadRegions();
+
+    if (refreshCatalogs) await refreshCatalogs();
   };
 
   const updateRegionPoint = (index, key, value) => {
@@ -1084,7 +1321,10 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
         </div>
 
         <div className="map-editor-layout">
-          <div className="map-editor-map-wrap">
+          <div
+            className="map-editor-map-wrap"
+            onContextMenu={onMapContextMenu}
+          >
             <svg
               ref={svgRef}
               className="map-editor-svg"
@@ -1094,6 +1334,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
               onMouseUp={onMapMouseUp}
               onMouseLeave={onMapMouseLeave}
               onContextMenu={onMapContextMenu}
+              onContextMenuCapture={onMapContextMenu}
             >
               {copyOffsets.map((offset) => (
                 <image
@@ -1563,7 +1804,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                   <div>
                     <h3>Region editor</h3>
                     <p className="muted">
-                      Draw any shape. Right-click on the map to remove the last point.
+                      Choose MainRegion, SubRegion, or SeaTradeRegion. Right-click removes the last point.
                     </p>
                   </div>
 
@@ -1592,7 +1833,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     type="button"
                     className="button button-secondary"
                     onClick={deleteRegion}
-                    disabled={!regionForm.id}
+                    disabled={!regionForm.name || !isEditableRegionType(regionForm.type)}
                   >
                     <Trash2 size={16} /> Delete
                   </button>
@@ -1647,7 +1888,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                       <option value="MainRegion">MainRegion</option>
                       <option value="SubRegion">SubRegion</option>
                       <option value="SeaTradeRegion">SeaTradeRegion</option>
-                      <option value="Custom">Custom</option>
                     </select>
                   </label>
 
@@ -1665,7 +1905,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                 <div className="map-editor-location-summary">
                   <strong>{activeRegionLabel}</strong>
                   <span>
-                    Click the map to add points. Right-click removes the last point. Save is always visible at the top.
+                    Click the map to add points. Right-click removes the last point. Saving updates every city inside this region and clears cities outside it that used this region.
                   </span>
                 </div>
 
