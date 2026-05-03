@@ -165,8 +165,10 @@ function buildRegionPayload(form) {
     parentRegion: form.parentRegion.trim() || null,
     color: form.color || '#60a5fa',
     enabled: Boolean(form.enabled),
+    // Keep the region X as a continuous map value.
+    // Do not normalize it to 0..4096, because that breaks polygons crossing the wrap seam.
     points: form.points.map((point) => ({
-      x: normalizeMapX(Number(point.x ?? point.X)),
+      x: Number(point.x ?? point.X),
       y: clamp(Number(point.y ?? point.Y), 0, MAP_PIXEL_HEIGHT)
     }))
   };
@@ -240,12 +242,53 @@ function mapCopiesForView(viewBox) {
   return offsets;
 }
 
+function getRegionPointX(point) {
+  return Number(point?.x ?? point?.X ?? 0);
+}
+
+function getRegionPointY(point) {
+  return Number(point?.y ?? point?.Y ?? 0);
+}
+
+function unwrapRegionPoints(points) {
+  if (!points?.length) return [];
+
+  const validPoints = points
+    .map((point) => ({
+      x: getRegionPointX(point),
+      y: getRegionPointY(point)
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+
+  if (!validPoints.length) return [];
+
+  const result = [validPoints[0]];
+
+  for (let index = 1; index < validPoints.length; index += 1) {
+    const previous = result[result.length - 1];
+    const current = validPoints[index];
+
+    result.push({
+      x: nearestWrappedX(current.x, previous.x),
+      y: current.y
+    });
+  }
+
+  return result;
+}
+
+function regionPointsToString(points) {
+  return unwrapRegionPoints(points)
+    .map((point) => `${point.x},${point.y}`)
+    .join(' ');
+}
+
 function MapClickHelp({ mode, zoomLevel }) {
   return (
     <p className="mini-info">
       {mode === 'city'
         ? 'City mode: select or create a city, then click the map to place or move it. Drag the map to pan and use mouse wheel to zoom.'
-        : 'Region mode: click the map to add polygon points. Drag the map to pan. Regions can overlap and can be any shape.'}
+        : 'Region mode: click the map to add polygon points. Each point links to the next one, even across the wrap seam. Drag to pan.'}
       {' '}
       The map wraps horizontally, so you can keep moving left/right around the world. Current editor zoom: {zoomLevel.toFixed(1)}x.
     </p>
@@ -283,6 +326,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [saveNotice, setSaveNotice] = useState(null);
 
   viewBoxRef.current = viewBox;
 
@@ -392,6 +436,24 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     cityDirtyRef.current = false;
     setCityHasUnsavedChanges(false);
   };
+
+  const showSaveNotice = (text, kind = 'success') => {
+    setSaveNotice({
+      id: Date.now(),
+      text,
+      kind
+    });
+  };
+
+  useEffect(() => {
+    if (!saveNotice) return;
+
+    const timer = setTimeout(() => {
+      setSaveNotice(null);
+    }, 1800);
+
+    return () => clearTimeout(timer);
+  }, [saveNotice]);
 
   const clampViewBox = (next) => {
     const width = clamp(next.width, MIN_VIEW_WIDTH, MAX_VIEW_WIDTH);
@@ -585,10 +647,49 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       return;
     }
 
+    setRegionForm((current) => {
+      const previousPoint = current.points[current.points.length - 1];
+      const previousX = previousPoint ? getRegionPointX(previousPoint) : null;
+
+      return {
+        ...current,
+        points: [
+          ...current.points,
+          {
+            // Keep the X near the previous clicked point.
+            // This makes a click near the right edge and then the left edge connect across the wrap seam.
+            x: previousX == null ? point.continuousX : nearestWrappedX(point.x, previousX),
+            y: point.y
+          }
+        ]
+      };
+    });
+  };
+
+  const onMapContextMenu = (event) => {
+    if (mode !== 'region') return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    dragRef.current = null;
+
+    if (!regionForm.points.length) {
+      setMessage('No region point to remove.');
+      showSaveNotice('No region point to remove.', 'info');
+      return;
+    }
+
+    const nextPointCount = Math.max(0, regionForm.points.length - 1);
+
     setRegionForm((current) => ({
       ...current,
-      points: [...current.points, { x: point.x, y: point.y }]
+      points: current.points.slice(0, -1)
     }));
+
+    setMessage(
+      `Removed last region point. ${nextPointCount} point${nextPointCount === 1 ? '' : 's'} remaining.`
+    );
   };
 
   const onMapMouseLeave = () => {
@@ -621,7 +722,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     if (!result) return false;
 
     clearCityDirty();
-    setMessage(auto ? `Saved moved city '${payload.name}'.` : normalizeApiResult(result));
+
+    const successMessage = auto ? `Saved moved city '${payload.name}'.` : normalizeApiResult(result);
+    showSaveNotice(successMessage);
 
     setCityForm((current) => {
       const shouldUpdateCurrentForm =
@@ -794,7 +897,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       : await run(() => api.addMapRegion(payload), 'Could not add region');
 
     if (result) {
-      setMessage(normalizeApiResult(result));
+      const successMessage = normalizeApiResult(result);
+      showSaveNotice(successMessage);
+
       setRegionForm(regionToForm(result.region || result.Region || payload));
       await loadRegions();
     }
@@ -825,7 +930,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
       next[index] = {
         ...next[index],
-        [key]: key === 'x' ? normalizeMapX(rawValue) : clamp(rawValue, 0, MAP_PIXEL_HEIGHT)
+        [key]: key === 'x' ? rawValue : clamp(rawValue, 0, MAP_PIXEL_HEIGHT)
       };
 
       return {
@@ -842,9 +947,15 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     }));
   };
 
-  const regionPoints = regionForm.points
-    .map((point) => `${Number(point.x ?? point.X)},${Number(point.y ?? point.Y)}`)
-    .join(' ');
+  const regionPreviewPoints = useMemo(
+    () => unwrapRegionPoints(regionForm.points),
+    [regionForm.points]
+  );
+
+  const regionPoints = useMemo(
+    () => regionPreviewPoints.map((point) => `${point.x},${point.y}`).join(' '),
+    [regionPreviewPoints]
+  );
 
   const mapUnitsPerScreenPixel = viewBox.width / Math.max(1, svgSize.width);
 
@@ -913,6 +1024,18 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
           </div>
         )}
 
+        {saveNotice && (
+          <div
+            key={saveNotice.id}
+            className={`map-editor-save-notice map-editor-save-notice-${saveNotice.kind}`}
+            role="status"
+            aria-live="polite"
+          >
+            <CheckCircle2 size={18} />
+            <strong>{saveNotice.text}</strong>
+          </div>
+        )}
+
         <div className="map-editor-toolbar">
           <button type="button" className="button button-secondary" onClick={() => zoomAt(ZOOM_STEP)}>
             <ZoomIn size={16} /> Zoom in
@@ -961,6 +1084,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
               onMouseMove={onMapMouseMove}
               onMouseUp={onMapMouseUp}
               onMouseLeave={onMapMouseLeave}
+              onContextMenu={onMapContextMenu}
             >
               {copyOffsets.map((offset) => (
                 <image
@@ -980,11 +1104,12 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     .filter((region) => region.enabled ?? region.Enabled ?? true)
                     .map((region) => {
                       const points = region.points || region.Points || [];
-                      const pointString = points
-                        .map((point) => `${Number(point.x ?? point.X)},${Number(point.y ?? point.Y)}`)
+                      const unwrappedPoints = unwrapRegionPoints(points);
+                      const pointString = unwrappedPoints
+                        .map((point) => `${point.x},${point.y}`)
                         .join(' ');
 
-                      if (points.length < 2) return null;
+                      if (unwrappedPoints.length < 2) return null;
 
                       return (
                         <polygon
@@ -998,13 +1123,25 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                       );
                     })}
 
-                  {regionForm.points.length >= 2 && (
+                  {regionPreviewPoints.length >= 3 && (
                     <polygon
                       points={regionPoints}
                       fill={regionForm.color}
                       stroke={regionForm.color}
-                      opacity="0.45"
+                      opacity="0.35"
                       strokeWidth={Math.max(0.9, 5 / zoomLevel)}
+                    />
+                  )}
+
+                  {regionPreviewPoints.length >= 2 && (
+                    <polyline
+                      points={regionPoints}
+                      fill="none"
+                      stroke={regionForm.color}
+                      opacity="0.95"
+                      strokeWidth={Math.max(1.2, 5 / zoomLevel)}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
                   )}
                 </g>
@@ -1101,11 +1238,11 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
               {copyOffsets.map((offset) => (
                 <g key={`region-points-copy-${offset}`} transform={`translate(${offset}, 0)`}>
-                  {regionForm.points.map((point, index) => (
+                  {regionPreviewPoints.map((point, index) => (
                     <circle
-                      key={`${point.x ?? point.X}-${point.y ?? point.Y}-${index}`}
-                      cx={Number(point.x ?? point.X)}
-                      cy={Number(point.y ?? point.Y)}
+                      key={`${point.x}-${point.y}-${index}`}
+                      cx={point.x}
+                      cy={point.y}
                       r={clamp(9 / Math.sqrt(zoomLevel), 2, 8)}
                       className="map-editor-region-point"
                     />
