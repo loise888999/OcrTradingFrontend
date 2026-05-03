@@ -256,6 +256,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);
   const viewBoxRef = useRef(null);
+
   const [svgSize, setSvgSize] = useState({
     width: 1000,
     height: 500
@@ -263,6 +264,10 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
   const [mode, setMode] = useState('city');
   const [cityForm, setCityForm] = useState(emptyCityForm());
+  const cityFormRef = useRef(cityForm);
+  const cityDirtyRef = useRef(false);
+  const [cityHasUnsavedChanges, setCityHasUnsavedChanges] = useState(false);
+
   const [citySearch, setCitySearch] = useState('');
   const [showUnplacedOnly, setShowUnplacedOnly] = useState(false);
 
@@ -354,6 +359,10 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   }, []);
 
   useEffect(() => {
+    cityFormRef.current = cityForm;
+  }, [cityForm]);
+
+  useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
 
@@ -373,6 +382,16 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
     return () => observer.disconnect();
   }, []);
+
+  const markCityDirty = () => {
+    cityDirtyRef.current = true;
+    setCityHasUnsavedChanges(true);
+  };
+
+  const clearCityDirty = () => {
+    cityDirtyRef.current = false;
+    setCityHasUnsavedChanges(false);
+  };
 
   const clampViewBox = (next) => {
     const width = clamp(next.width, MIN_VIEW_WIDTH, MAX_VIEW_WIDTH);
@@ -545,13 +564,23 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     setError('');
 
     if (mode === 'city') {
-      setCityForm((current) => ({
-        ...current,
+      const wasExistingCity = Boolean(cityFormRef.current.originalName);
+
+      const updatedCityForm = {
+        ...cityFormRef.current,
         mapPixelX: point.x,
         mapPixelY: point.y,
         worldX: point.x * WORLD_SCALE,
         worldY: point.y * WORLD_SCALE
-      }));
+      };
+
+      cityFormRef.current = updatedCityForm;
+      setCityForm(updatedCityForm);
+
+      if (wasExistingCity) {
+        markCityDirty();
+        setMessage('City moved. Click another city or click the moved city dot to save.');
+      }
 
       return;
     }
@@ -566,21 +595,102 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     dragRef.current = null;
   };
 
+  const saveCityForm = async (formToSave = cityFormRef.current, { auto = false } = {}) => {
+    if (!auto) {
+      setMessage('');
+      setError('');
+    }
+
+    const payload = buildCityPayload(formToSave);
+
+    if (!payload.name) {
+      if (!auto) setError('City name is required.');
+      return false;
+    }
+
+    // Auto-save is only for existing cities that were moved.
+    // New cities still require the Save city button.
+    if (auto && !formToSave.originalName) {
+      return true;
+    }
+
+    const result = formToSave.originalName
+      ? await run(() => api.updateCity(formToSave.originalName, payload), 'Could not update city')
+      : await run(() => api.addCity(payload), 'Could not add city');
+
+    if (!result) return false;
+
+    clearCityDirty();
+    setMessage(auto ? `Saved moved city '${payload.name}'.` : normalizeApiResult(result));
+
+    setCityForm((current) => {
+      const shouldUpdateCurrentForm =
+        current.originalName === formToSave.originalName ||
+        current.name === formToSave.name ||
+        current.name === payload.name;
+
+      if (!shouldUpdateCurrentForm) return current;
+
+      const updated = {
+        ...current,
+        originalName: payload.name,
+        name: payload.name,
+        mapPixelX: payload.mapPixelX ?? '',
+        mapPixelY: payload.mapPixelY ?? '',
+        worldX: payload.worldX ?? '',
+        worldY: payload.worldY ?? ''
+      };
+
+      cityFormRef.current = updated;
+
+      return updated;
+    });
+
+    if (refreshCatalogs) await refreshCatalogs();
+
+    return true;
+  };
+
+  const saveCity = async () => {
+    await saveCityForm(cityFormRef.current, { auto: false });
+  };
+
+  const autoSaveMovedCity = async () => {
+    if (!cityDirtyRef.current) return true;
+
+    const formToSave = cityFormRef.current;
+
+    if (!formToSave.originalName) return true;
+
+    return saveCityForm(formToSave, { auto: true });
+  };
+
   const selectCity = (cityName) => {
     const city = cities.find((item) =>
       String(item.name || item.Name || '').toLowerCase() === String(cityName).toLowerCase()
     );
 
     if (!city) {
-      setCityForm((current) => ({
-        ...current,
-        originalName: '',
-        name: cityName
-      }));
+      clearCityDirty();
+
+      setCityForm((current) => {
+        const updated = {
+          ...current,
+          originalName: '',
+          name: cityName
+        };
+
+        cityFormRef.current = updated;
+
+        return updated;
+      });
+
       return;
     }
 
     const form = cityToForm(city);
+    clearCityDirty();
+    cityFormRef.current = form;
     setCityForm(form);
 
     if (form.mapPixelX !== '' && form.mapPixelY !== '') {
@@ -588,27 +698,31 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     }
   };
 
-  const saveCity = async () => {
-    setMessage('');
-    setError('');
+  const selectCityAfterAutoSave = async (cityName) => {
+    const saved = await autoSaveMovedCity();
+    if (!saved) return;
 
-    const payload = buildCityPayload(cityForm);
+    selectCity(cityName);
+  };
 
-    if (!payload.name) {
-      setError('City name is required.');
+  const handleCityMarkerClick = async (cityName) => {
+    const currentName = cityFormRef.current.originalName;
+    const wasDirty = cityDirtyRef.current;
+
+    const saved = await autoSaveMovedCity();
+    if (!saved) return;
+
+    // If the user clicks the moved city itself, that click only saves it.
+    if (
+      wasDirty &&
+      currentName &&
+      String(currentName).toLowerCase() === String(cityName).toLowerCase()
+    ) {
       return;
     }
 
-    const result = cityForm.originalName
-      ? await run(() => api.updateCity(cityForm.originalName, payload), 'Could not update city')
-      : await run(() => api.addCity(payload), 'Could not add city');
-
-    if (result) {
-      setMessage(normalizeApiResult(result));
-      setCityForm((current) => ({ ...current, originalName: payload.name }));
-
-      if (refreshCatalogs) await refreshCatalogs();
-    }
+    selectCity(cityName);
+    setMode('city');
   };
 
   const deleteCity = async () => {
@@ -830,6 +944,13 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
           </span>
         </div>
 
+        {cityHasUnsavedChanges && (
+          <div className="warning-info mini-info">
+            <strong>Moved city not saved yet</strong>
+            <p>Click another city or click the moved city dot again to save the new position.</p>
+          </div>
+        )}
+
         <div className="map-editor-layout">
           <div className="map-editor-map-wrap">
             <svg
@@ -907,10 +1028,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                           r={selected ? selectedMarkerRadius : markerRadius}
                           className={selected ? 'map-editor-city-point selected' : 'map-editor-city-point'}
                           onMouseDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
+                          onClick={async (event) => {
                             event.stopPropagation();
-                            selectCity(cityName);
-                            setMode('city');
+                            await handleCityMarkerClick(cityName);
                           }}
                         />
 
@@ -922,6 +1042,11 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                             style={{
                               fontSize: labelFontSize,
                               strokeWidth: labelStrokeWidth
+                            }}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={async (event) => {
+                              event.stopPropagation();
+                              await handleCityMarkerClick(cityName);
                             }}
                           >
                             {cityName}
@@ -940,6 +1065,15 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     cy={Number(cityForm.mapPixelY)}
                     r={selectedMarkerRadius}
                     className="map-editor-new-city-point"
+                    style={{
+                      pointerEvents: cityHasUnsavedChanges ? 'auto' : 'none',
+                      cursor: cityHasUnsavedChanges ? 'pointer' : 'default'
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={async (event) => {
+                      event.stopPropagation();
+                      await autoSaveMovedCity();
+                    }}
                   />
 
                   {(showLabels || !cityForm.originalName) && cityForm.name && (
@@ -949,7 +1083,14 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                       className="map-editor-city-label"
                       style={{
                         fontSize: labelFontSize,
-                        strokeWidth: labelStrokeWidth
+                        strokeWidth: labelStrokeWidth,
+                        pointerEvents: cityHasUnsavedChanges ? 'auto' : 'none',
+                        cursor: cityHasUnsavedChanges ? 'pointer' : 'default'
+                      }}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        await autoSaveMovedCity();
                       }}
                     >
                       {cityForm.name}
@@ -1028,7 +1169,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     <select
                       className="input"
                       value={cityForm.originalName || cityForm.name}
-                      onChange={(event) => selectCity(event.target.value)}
+                      onChange={async (event) => {
+                        await selectCityAfterAutoSave(event.target.value);
+                      }}
                     >
                       <option value="">Select a city...</option>
                       {visibleCities.map((city) => {
@@ -1051,7 +1194,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     className="input"
                     list="map-editor-city-options"
                     value={cityForm.originalName}
-                    onChange={(event) => selectCity(event.target.value)}
+                    onChange={async (event) => {
+                      await selectCityAfterAutoSave(event.target.value);
+                    }}
                     placeholder="Choose a city..."
                   />
                 </label>
@@ -1126,11 +1271,19 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                         const raw = event.target.value;
                         const normalized = raw === '' ? '' : Math.round(normalizeMapX(Number(raw)));
 
-                        setCityForm((current) => ({
-                          ...current,
+                        const updated = {
+                          ...cityFormRef.current,
                           mapPixelX: normalized,
                           worldX: normalized === '' ? '' : mapToWorld(normalized)
-                        }));
+                        };
+
+                        const wasExistingCity = Boolean(cityFormRef.current.originalName);
+                        cityFormRef.current = updated;
+                        setCityForm(updated);
+
+                        if (wasExistingCity) {
+                          markCityDirty();
+                        }
                       }}
                     />
                   </label>
@@ -1145,11 +1298,19 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                         const raw = event.target.value;
                         const value = raw === '' ? '' : Math.round(clamp(Number(raw), 0, MAP_PIXEL_HEIGHT));
 
-                        setCityForm((current) => ({
-                          ...current,
+                        const updated = {
+                          ...cityFormRef.current,
                           mapPixelY: value,
                           worldY: value === '' ? '' : mapToWorld(value)
-                        }));
+                        };
+
+                        const wasExistingCity = Boolean(cityFormRef.current.originalName);
+                        cityFormRef.current = updated;
+                        setCityForm(updated);
+
+                        if (wasExistingCity) {
+                          markCityDirty();
+                        }
                       }}
                     />
                   </label>
@@ -1170,7 +1331,19 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
                     <Save size={16} /> Save city
                   </button>
 
-                  <button type="button" className="button button-secondary" onClick={() => setCityForm(emptyCityForm())}>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={async () => {
+                      const saved = await autoSaveMovedCity();
+                      if (!saved) return;
+
+                      clearCityDirty();
+                      const empty = emptyCityForm();
+                      cityFormRef.current = empty;
+                      setCityForm(empty);
+                    }}
+                  >
                     <Plus size={16} /> New city
                   </button>
 
