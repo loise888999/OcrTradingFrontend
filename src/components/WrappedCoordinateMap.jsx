@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eraser, Map, RefreshCw, ZoomIn, ZoomOut } from 'lucide-react';
 
 const MAP_IMAGE_URL = '/maps/world-map.png';
+
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const MAX_SESSION_TRAIL_POINTS = 10000;
+const MAX_SLOPE_WORLD_LENGTH_RATIO = 0.75;
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -19,6 +21,7 @@ function normalizePanX(panX, worldWidth, zoom) {
   let normalized = panX % tilePx;
   if (normalized > 0) normalized -= tilePx;
   if (normalized <= -tilePx) normalized += tilePx;
+
   return normalized;
 }
 
@@ -36,8 +39,10 @@ function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth
 
 function unwrapDx(previousX, latestX, width) {
   let dx = latestX - previousX;
+
   if (dx > width / 2) dx -= width;
   if (dx < -width / 2) dx += width;
+
   return dx;
 }
 
@@ -65,13 +70,16 @@ function getPointTimestamp(point) {
 }
 
 function getPointKey(point, index = 0) {
+  const timestamp =
+    point?.capturedAtUtc ||
+    point?.createdAtUtc ||
+    point?.timeUtc ||
+    point?.timestamp ||
+    '';
+
   return String(
     point?.id ??
-      point?.capturedAtUtc ??
-      point?.createdAtUtc ??
-      point?.timeUtc ??
-      point?.timestamp ??
-      `${point?.x}:${point?.y}:${index}`
+      `${point?.x}:${point?.y}:${timestamp || index}`
   );
 }
 
@@ -84,9 +92,9 @@ function pruneTrail(points, trailWindow) {
     const windowMs = trailWindow === '30m' ? THIRTY_MINUTES_MS : TWO_HOURS_MS;
     const now = Date.now();
 
-    const timestamped = next.filter((point) => getPointTimestamp(point) != null);
+    const hasTimestamps = next.some((point) => getPointTimestamp(point) != null);
 
-    if (timestamped.length > 0) {
+    if (hasTimestamps) {
       next = next.filter((point) => {
         const time = getPointTimestamp(point);
         return time == null || now - time <= windowMs;
@@ -126,8 +134,8 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
   if (points.length < 2) return null;
 
   const recent = points.slice(-Math.max(2, sampleCount));
-  let currentX = Number(recent[0].x);
 
+  let currentX = Number(recent[0].x);
   const unwrapped = [{ ...recent[0], unwrappedX: currentX, t: 0 }];
 
   for (let i = 1; i < recent.length; i += 1) {
@@ -146,6 +154,7 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
 
   for (const point of unwrapped) {
     const dt = point.t - meanT;
+
     denominator += dt * dt;
     numeratorX += dt * (point.unwrappedX - meanX);
     numeratorY += dt * (Number(point.y) - meanY);
@@ -155,51 +164,73 @@ function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
 
   const dxPerStep = numeratorX / denominator;
   const dyPerStep = numeratorY / denominator;
+  const speedPerStep = Math.hypot(dxPerStep, dyPerStep);
 
-  if (Math.abs(dxPerStep) < 0.001 && Math.abs(dyPerStep) < 0.001) return null;
+  if (speedPerStep < 0.001) return null;
 
   const latest = unwrapped[unwrapped.length - 1];
+
   const latestUnwrappedX = latest.unwrappedX;
   const latestY = Number(latest.y);
-  const candidates = [];
 
-  if (dxPerStep > 0) {
-    const nextBoundary = Math.ceil(latestUnwrappedX / worldWidth) * worldWidth;
-    const boundary = nextBoundary <= latestUnwrappedX ? nextBoundary + worldWidth : nextBoundary;
-    candidates.push((boundary - latestUnwrappedX) / dxPerStep);
+  const maxSlopeLength = worldWidth * MAX_SLOPE_WORLD_LENGTH_RATIO;
+  const maxTByLength = maxSlopeLength / speedPerStep;
+
+  const candidates = [maxTByLength];
+
+  if (dyPerStep > 0) {
+    candidates.push((worldHeight - latestY) / dyPerStep);
   }
 
-  if (dxPerStep < 0) {
-    const previousBoundary = Math.floor(latestUnwrappedX / worldWidth) * worldWidth;
-    const boundary = previousBoundary >= latestUnwrappedX ? previousBoundary - worldWidth : previousBoundary;
-    candidates.push((boundary - latestUnwrappedX) / dxPerStep);
+  if (dyPerStep < 0) {
+    candidates.push((0 - latestY) / dyPerStep);
   }
-
-  if (dyPerStep > 0) candidates.push((worldHeight - latestY) / dyPerStep);
-  if (dyPerStep < 0) candidates.push((0 - latestY) / dyPerStep);
 
   const positive = candidates.filter((value) => Number.isFinite(value) && value > 0);
   const t = positive.length ? Math.min(...positive) : 1;
 
+  const endUnwrappedX = latestUnwrappedX + dxPerStep * t;
+  const endY = clampY(latestY + dyPerStep * t, worldHeight);
+
+  const startX = normalizeX(latestUnwrappedX, worldWidth);
+  const dx = endUnwrappedX - latestUnwrappedX;
+
   return {
     start: {
       ...latest,
-      x: normalizeX(latestUnwrappedX, worldWidth),
+      x: startX,
       y: clampY(latestY, worldHeight)
     },
     end: {
-      x: normalizeX(latestUnwrappedX + dxPerStep * t, worldWidth),
-      y: clampY(latestY + dyPerStep * t, worldHeight)
-    }
+      x: startX + dx,
+      y: endY
+    },
+    length: Math.hypot(dx, endY - latestY)
   };
 }
 
 function offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
   if (!rawSlopeLine) return null;
 
+  const startX = normalizeX(
+    Number(rawSlopeLine.start.x) + Number(waypointOffsetX || 0),
+    worldWidth
+  );
+
+  const dx = Number(rawSlopeLine.end.x) - Number(rawSlopeLine.start.x);
+
   return {
-    start: applyWaypointOffset(rawSlopeLine.start, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight),
-    end: applyWaypointOffset(rawSlopeLine.end, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight)
+    start: {
+      ...rawSlopeLine.start,
+      x: startX,
+      y: clampY(Number(rawSlopeLine.start.y) + Number(waypointOffsetY || 0), worldHeight)
+    },
+    end: {
+      ...rawSlopeLine.end,
+      x: startX + dx,
+      y: clampY(Number(rawSlopeLine.end.y) + Number(waypointOffsetY || 0), worldHeight)
+    },
+    length: rawSlopeLine.length
   };
 }
 
@@ -582,7 +613,7 @@ export default function WrappedCoordinateMap({
               <Map size={22} /> Full Window Wrapped Map
             </h2>
             <p>
-              Drag to move. Mouse wheel zooms only this map. Trail is separate from direction calculation.
+              Drag to move. Mouse wheel zooms only this map. Direction is limited and trail is separate.
             </p>
           </div>
 
@@ -653,7 +684,13 @@ export default function WrappedCoordinateMap({
             <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
             <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
             <span>Trail points: {sessionTrailRaw.length}</span>
-            <span>Trail mode: {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}</span>
+            <span>
+              Trail mode:{' '}
+              {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}
+            </span>
+            <span>
+              Direction max: {(MAX_SLOPE_WORLD_LENGTH_RATIO * 100).toFixed(0)}% map width
+            </span>
             <span>Zoom {(zoom * 100).toFixed(1)}%</span>
           </div>
         </div>
