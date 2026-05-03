@@ -256,6 +256,10 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   const svgRef = useRef(null);
   const dragRef = useRef(null);
   const viewBoxRef = useRef(null);
+  const [svgSize, setSvgSize] = useState({
+    width: 1000,
+    height: 500
+  });
 
   const [mode, setMode] = useState('city');
   const [cityForm, setCityForm] = useState(emptyCityForm());
@@ -347,6 +351,27 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   useEffect(() => {
     loadRegions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const updateSize = () => {
+      const rect = svg.getBoundingClientRect();
+
+      setSvgSize({
+        width: Math.max(1, rect.width),
+        height: Math.max(1, rect.height)
+      });
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(svg);
+
+    return () => observer.disconnect();
   }, []);
 
   const clampViewBox = (next) => {
@@ -707,10 +732,20 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     .map((point) => `${Number(point.x ?? point.X)},${Number(point.y ?? point.Y)}`)
     .join(' ');
 
+  const mapUnitsPerScreenPixel = viewBox.width / Math.max(1, svgSize.width);
+
   const markerRadius = clamp(8 / Math.sqrt(zoomLevel), 1.8, 7);
   const selectedMarkerRadius = clamp(12 / Math.sqrt(zoomLevel), 3.5, 12);
-  const labelFontSize = clamp(22 / zoomLevel, 5, 15);
-  const labelStrokeWidth = clamp(1.6 / Math.sqrt(zoomLevel), 0.35, 1.6);
+
+  // Desired visible text size in screen pixels.
+  // This gets smaller as the user zooms in.
+  const labelScreenPixels = clamp(15 - zoomLevel * 1.95, 12, 13);
+
+  // Convert screen-pixel size back into map units.
+  const labelFontSize = labelScreenPixels * mapUnitsPerScreenPixel;
+  const labelStrokeWidth = clamp(1.2 * mapUnitsPerScreenPixel, 0.12, 1.1);
+  const labelOffset = selectedMarkerRadius + 6 * mapUnitsPerScreenPixel;
+
   const regionStrokeWidth = Math.max(0.7, 4 / zoomLevel);
 
   const selectedCityContinuousX =
@@ -881,16 +916,12 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
                         {(showLabels || selected) && (
                           <text
-                            x={cx + selectedMarkerRadius + 3 / zoomLevel}
+                            x={cx + labelOffset}
                             y={coord.y - selectedMarkerRadius}
                             className="map-editor-city-label"
-                            fontSize={labelFontSize}
-                            strokeWidth={labelStrokeWidth}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectCity(cityName);
-                              setMode('city');
+                            style={{
+                              fontSize: labelFontSize,
+                              strokeWidth: labelStrokeWidth
                             }}
                           >
                             {cityName}
@@ -913,11 +944,13 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
                   {(showLabels || !cityForm.originalName) && cityForm.name && (
                     <text
-                      x={selectedCityContinuousX + selectedMarkerRadius + 3 / zoomLevel}
+                      x={selectedCityContinuousX + labelOffset}
                       y={Number(cityForm.mapPixelY) - selectedMarkerRadius}
                       className="map-editor-city-label"
-                      fontSize={labelFontSize}
-                      strokeWidth={labelStrokeWidth}
+                      style={{
+                        fontSize: labelFontSize,
+                        strokeWidth: labelStrokeWidth
+                      }}
                     >
                       {cityForm.name}
                     </text>
