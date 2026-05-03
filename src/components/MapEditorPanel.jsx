@@ -324,7 +324,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     height: MAP_PIXEL_HEIGHT
   });
 
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [saveNotice, setSaveNotice] = useState(null);
 
@@ -622,7 +621,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     const point = screenToMapPoint(event.clientX, event.clientY);
     if (!point) return;
 
-    setMessage('');
     setError('');
 
     if (mode === 'city') {
@@ -641,7 +639,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
       if (wasExistingCity) {
         markCityDirty();
-        setMessage('City moved. Click another city or click the moved city dot to save.');
+        showSaveNotice('City moved. Click another city or click the moved city dot to save.', 'info');
       }
 
       return;
@@ -675,7 +673,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     dragRef.current = null;
 
     if (!regionForm.points.length) {
-      setMessage('No region point to remove.');
       showSaveNotice('No region point to remove.', 'info');
       return;
     }
@@ -687,8 +684,9 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       points: current.points.slice(0, -1)
     }));
 
-    setMessage(
-      `Removed last region point. ${nextPointCount} point${nextPointCount === 1 ? '' : 's'} remaining.`
+    showSaveNotice(
+      `Removed last region point. ${nextPointCount} point${nextPointCount === 1 ? '' : 's'} remaining.`,
+      'info'
     );
   };
 
@@ -698,8 +696,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
 
   const saveCityForm = async (formToSave = cityFormRef.current, { auto = false } = {}) => {
     if (!auto) {
-      setMessage('');
-      setError('');
+        setError('');
     }
 
     const payload = buildCityPayload(formToSave);
@@ -829,7 +826,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const deleteCity = async () => {
-    setMessage('');
     setError('');
 
     if (!cityForm.originalName) {
@@ -840,7 +836,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     const result = await run(() => api.deleteCity(cityForm.originalName), 'Could not delete city');
 
     if (result) {
-      setMessage(normalizeApiResult(result));
+      showSaveNotice(normalizeApiResult(result));
       setCityForm(emptyCityForm());
 
       if (refreshCatalogs) await refreshCatalogs();
@@ -882,7 +878,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const saveRegion = async () => {
-    setMessage('');
     setError('');
 
     const payload = buildRegionPayload(regionForm);
@@ -906,7 +901,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
   };
 
   const deleteRegion = async () => {
-    setMessage('');
     setError('');
 
     if (!regionForm.id) {
@@ -917,7 +911,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
     const result = await run(() => api.deleteMapRegion(regionForm.id), 'Could not delete region');
 
     if (result) {
-      setMessage(normalizeApiResult(result));
+      showSaveNotice(normalizeApiResult(result));
       setRegionForm(emptyRegionForm());
       await loadRegions();
     }
@@ -1011,12 +1005,6 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
         </div>
 
         <MapClickHelp mode={mode} zoomLevel={zoomLevel} />
-
-        {message && (
-          <div className="success-info mini-info">
-            <strong><CheckCircle2 size={16} /> {message}</strong>
-          </div>
-        )}
 
         {error && (
           <div className="danger-info mini-info">
