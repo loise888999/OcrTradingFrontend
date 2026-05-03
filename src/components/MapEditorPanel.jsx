@@ -38,8 +38,17 @@ function nearestWrappedX(x, referenceX) {
   return normalized + copy * MAP_PIXEL_WIDTH;
 }
 
+function isEmptyRegionValue(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return !normalized || normalized === 'unassigned';
+}
+
+function cleanRegionValue(value) {
+  return isEmptyRegionValue(value) ? '' : String(value || '').trim();
+}
+
 function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(values.map(cleanRegionValue).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 function parseAliases(value) {
@@ -63,9 +72,9 @@ function emptyCityForm() {
     originalName: '',
     name: '',
     aliases: '',
-    mainRegion: 'Unassigned',
-    subRegion: 'Unassigned',
-    seaTradeRegion: 'Unassigned',
+    mainRegion: '',
+    subRegion: '',
+    seaTradeRegion: '',
     mapPixelX: '',
     mapPixelY: '',
     worldX: '',
@@ -83,9 +92,9 @@ function cityToForm(city) {
     originalName: city.name || city.Name || '',
     name: city.name || city.Name || '',
     aliases: aliasesToText(city.aliases || city.Aliases),
-    mainRegion: city.mainRegion || city.MainRegion || 'Unassigned',
-    subRegion: city.subRegion || city.SubRegion || 'Unassigned',
-    seaTradeRegion: city.seaTradeRegion || city.SeaTradeRegion || 'Unassigned',
+    mainRegion: cleanRegionValue(city.mainRegion || city.MainRegion),
+    subRegion: cleanRegionValue(city.subRegion || city.SubRegion),
+    seaTradeRegion: cleanRegionValue(city.seaTradeRegion || city.SeaTradeRegion),
     mapPixelX,
     mapPixelY,
     worldX: city.worldX ?? city.WorldX ?? (mapPixelX === '' ? '' : mapToWorld(mapPixelX)),
@@ -147,9 +156,9 @@ function buildCityPayload(form) {
   return {
     name: String(form.name || '').trim(),
     aliases: parseAliases(form.aliases),
-    mainRegion: String(form.mainRegion || '').trim() || 'Unassigned',
-    subRegion: String(form.subRegion || '').trim() || 'Unassigned',
-    seaTradeRegion: String(form.seaTradeRegion || '').trim() || 'Unassigned',
+    mainRegion: cleanRegionValue(form.mainRegion),
+    subRegion: cleanRegionValue(form.subRegion),
+    seaTradeRegion: cleanRegionValue(form.seaTradeRegion),
     mapPixelX,
     mapPixelY,
     worldX: mapPixelX == null ? null : Math.round(mapPixelX * WORLD_SCALE),
@@ -199,7 +208,7 @@ function buildOfficialRegionOptions(cities) {
     const subRegion = city.subRegion || city.SubRegion || '';
     const seaTradeRegion = city.seaTradeRegion || city.SeaTradeRegion || '';
 
-    if (mainRegion) {
+    if (!isEmptyRegionValue(mainRegion)) {
       main.set(`MainRegion|${mainRegion}`, {
         type: 'MainRegion',
         name: mainRegion,
@@ -207,19 +216,19 @@ function buildOfficialRegionOptions(cities) {
       });
     }
 
-    if (subRegion) {
+    if (!isEmptyRegionValue(subRegion)) {
       sub.set(`SubRegion|${subRegion}|${mainRegion}`, {
         type: 'SubRegion',
         name: subRegion,
-        parentRegion: mainRegion
+        parentRegion: cleanRegionValue(mainRegion)
       });
     }
 
-    if (seaTradeRegion) {
+    if (!isEmptyRegionValue(seaTradeRegion)) {
       sea.set(`SeaTradeRegion|${seaTradeRegion}|${subRegion || mainRegion}`, {
         type: 'SeaTradeRegion',
         name: seaTradeRegion,
-        parentRegion: subRegion || mainRegion
+        parentRegion: cleanRegionValue(subRegion || mainRegion)
       });
     }
   }
@@ -335,10 +344,10 @@ function buildCityUpdatePayload(city, overrides = {}) {
   return {
     name: overrides.name ?? getCityName(city),
     aliases: overrides.aliases ?? getCityAliases(city),
-    mainRegion: overrides.mainRegion ?? getCityField(city, 'mainRegion', 'MainRegion', 'Unassigned'),
-    subRegion: overrides.subRegion ?? getCityField(city, 'subRegion', 'SubRegion', 'Unassigned'),
+    mainRegion: overrides.mainRegion ?? cleanRegionValue(getCityField(city, 'mainRegion', 'MainRegion', '')),
+    subRegion: overrides.subRegion ?? cleanRegionValue(getCityField(city, 'subRegion', 'SubRegion', '')),
     seaTradeRegion:
-      overrides.seaTradeRegion ?? getCityField(city, 'seaTradeRegion', 'SeaTradeRegion', 'Unassigned'),
+      overrides.seaTradeRegion ?? cleanRegionValue(getCityField(city, 'seaTradeRegion', 'SeaTradeRegion', '')),
     mapPixelX: overrides.mapPixelX ?? (mapPixelX === '' ? null : mapPixelX),
     mapPixelY: overrides.mapPixelY ?? (mapPixelY === '' ? null : mapPixelY),
     worldX: overrides.worldX ?? getCityField(city, 'worldX', 'WorldX', null),
@@ -1038,7 +1047,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       const currentValue = String(getCityField(city, field, field[0].toUpperCase() + field.slice(1), '')).trim();
 
       const inside = hasPolygon && coord ? isPointInsidePolygon(coord, points) : false;
-      const nextValue = inside ? regionName : currentValue === regionName ? 'Unassigned' : currentValue;
+      const nextValue = inside ? regionName : currentValue === regionName ? '' : currentValue;
 
       if (nextValue === currentValue) {
         skipped += 1;
@@ -1101,7 +1110,7 @@ export default function MapEditorPanel({ cities, run, refreshCatalogs }) {
       }
 
       const payload = buildCityUpdatePayload(city, {
-        [field]: 'Unassigned'
+        [field]: ''
       });
 
       const result = await run(
