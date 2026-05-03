@@ -74,6 +74,63 @@ export const api = {
       method: 'POST'
     }),
 
+  // City editor
+  addCity: (payload) =>
+    request('/api/cities', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  updateCity: (name, payload) =>
+    request(`/api/cities/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  deleteCity: (name) =>
+    request(`/api/cities/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    }),
+
+  importCitiesCsv: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${DEFAULT_API_BASE}/api/import/cities.csv`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`);
+    }
+
+    return response.json();
+  },
+
+  exportCitiesUrl: () => `${DEFAULT_API_BASE}/api/export/cities.csv`,
+
+  // Map region editor
+  getMapRegions: () => request('/api/map-regions'),
+
+  addMapRegion: (payload) =>
+    request('/api/map-regions', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  updateMapRegion: (id, payload) =>
+    request(`/api/map-regions/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  deleteMapRegion: (id) =>
+    request(`/api/map-regions/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+
   // Settings
   getSettings: () => request('/api/settings'),
 
