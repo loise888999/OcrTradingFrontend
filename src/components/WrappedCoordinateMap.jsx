@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eraser, Map, MapPin, RefreshCw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eraser, Map, MapPin, Maximize2, Minimize2, RefreshCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
 
 const MAP_IMAGE_URL = '/maps/world-map.png';
 const MAP_PIXEL_WIDTH = 4096;
@@ -65,6 +65,11 @@ function cleanText(value) {
 
 function normalizeName(value) {
   return cleanText(value).toLowerCase();
+}
+
+function sanitizeCityName(value) {
+  if (!value) return '';
+  return String(value).split('(')[0].split('\n')[0].split('\r')[0].trim();
 }
 
 function getPointTimestamp(point) {
@@ -491,6 +496,8 @@ export default function WrappedCoordinateMap({
   coordinates,
   cities = [],
   prices = [],
+  ocrStatus = null,
+  latestCity = null,
   worldWidth,
   worldHeight,
   xZeroOffset,
@@ -504,6 +511,8 @@ export default function WrappedCoordinateMap({
   const [lastMouse, setLastMouse] = useState(null);
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 700 });
   const [keepCentered, setKeepCentered] = useState(false);
+  const [isFullBrowserMap, setIsFullBrowserMap] = useState(false);
+  const [showMapSettings, setShowMapSettings] = useState(false);
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
@@ -535,6 +544,25 @@ export default function WrappedCoordinateMap({
       setCityGoodSearch('');
     }
   }, [showCityLayer]);
+
+  useEffect(() => {
+    if (!isFullBrowserMap) return undefined;
+
+    document.body.classList.add('map-full-browser-active');
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsFullBrowserMap(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.classList.remove('map-full-browser-active');
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullBrowserMap]);
 
   const current = coordinates[coordinates.length - 1];
 
@@ -616,6 +644,23 @@ export default function WrappedCoordinateMap({
 
     return matches;
   }, [prices, cityGoodSearchQuery]);
+
+  const buyGoodOptions = useMemo(() => {
+    const options = new Set();
+
+    for (const row of prices || []) {
+      if (normalizeName(getPriceTradeType(row)) !== 'buy') continue;
+
+      const item = getPriceItem(row);
+      if (item) options.add(item);
+    }
+
+    return [...options].sort((a, b) => a.localeCompare(b));
+  }, [prices]);
+
+  const latestCityName = sanitizeCityName(latestCity?.city || latestCity?.name || latestCity?.Name || '');
+  const ocrRunning = Boolean(ocrStatus?.running ?? ocrStatus?.isRunning ?? normalizeName(ocrStatus?.status).includes('running'));
+  const ocrStatusLabel = ocrRunning ? 'Running' : (ocrStatus ? 'Stopped' : 'Unknown');
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
@@ -1031,91 +1076,137 @@ export default function WrappedCoordinateMap({
   };
 
   return (
-    <div className="full-map-shell">
-      <Card className="map-card full-map-card">
-        <div className="card-header dark-header compact-header">
-          <div>
-            <h2>
-              <Map size={22} /> Full Window Wrapped Map
-            </h2>
-            <p>
-              Drag to move. Mouse wheel zooms only this map. Enable City links to click city dots without affecting map navigation.
-            </p>
-          </div>
+    <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
+      <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
+        <div className="map-compact-toolbar dark-header compact-header">
+          <div className="map-toolbar-main-row">
+            <div className="map-title-block">
+              <h2>
+                <Map size={20} /> Full Window Wrapped Map
+              </h2>
 
-          <div className="map-controls">
-            <div className="button-row">
-              <Button onClick={() => zoomByButton(1 / 1.14)}>
+              <div className="map-status-pills">
+                <span className={`map-status-pill ${ocrRunning ? 'status-running' : 'status-stopped'}`}>
+                  OCR: {ocrStatusLabel}
+                </span>
+                <span className="map-status-pill status-city">
+                  City: {latestCityName || 'Unknown'}
+                </span>
+                {showCityLayer && (
+                  <span className="map-status-pill status-city-links">
+                    City links: {visibleCityMarkers.length}/{cityMarkers.length}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="map-toolbar-actions">
+              <Button className="map-icon-button" onClick={() => zoomByButton(1 / 1.14)} title="Zoom out">
                 <ZoomOut size={16} />
               </Button>
 
-              <Button onClick={() => zoomByButton(1.14)}>
+              <Button className="map-icon-button" onClick={() => zoomByButton(1.14)} title="Zoom in">
                 <ZoomIn size={16} />
               </Button>
 
-              <Button onClick={() => centerOnCurrent()}>
-                Center current
+              <Button className="map-compact-button" onClick={() => centerOnCurrent()}>
+                Center
               </Button>
 
-              <Button onClick={eraseTrail} disabled={!current}>
-                <Eraser size={16} /> Erase trail
+              <Button className="map-compact-button" onClick={eraseTrail} disabled={!current}>
+                <Eraser size={16} /> Trail
               </Button>
 
-              <Button onClick={refreshCoordinates}>
-                <RefreshCw size={16} /> Refresh
+              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
+
+              <Button
+                className={`map-icon-button ${showMapSettings ? 'active' : ''}`}
+                onClick={() => setShowMapSettings((value) => !value)}
+                title="Map settings"
+              >
+                <SlidersHorizontal size={16} />
+              </Button>
+
+              <Button
+                className="map-icon-button"
+                onClick={() => setIsFullBrowserMap((value) => !value)}
+                title={isFullBrowserMap ? 'Exit full browser map' : 'Full browser map'}
+              >
+                {isFullBrowserMap ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </Button>
+
+              <Button className="map-icon-button" onClick={refreshCoordinates} title="Refresh coordinates">
+                <RefreshCw size={16} />
               </Button>
             </div>
+          </div>
 
-            <div className="toggle-row">
+          <div className="map-toolbar-quick-row">
+            <label className="map-toolbar-select-field" title="Trail duration">
+              <span>Trail</span>
+              <select
+                className="input"
+                value={trailWindow}
+                onChange={(event) => setTrailWindow(event.target.value)}
+              >
+                <option value="30m">30 min</option>
+                <option value="2h">2 hours</option>
+                <option value="session">Session</option>
+              </select>
+            </label>
+
+            {showCityLayer && (
+              <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
+                <span>Buy good</span>
+                <input
+                  className="input city-good-filter-input"
+                  value={cityGoodSearch}
+                  onChange={(event) => setCityGoodSearch(event.target.value)}
+                  placeholder="Example: Diamond"
+                  list="map-buy-good-options"
+                />
+
+                <datalist id="map-buy-good-options">
+                  {buyGoodOptions.slice(0, 300).map((item) => (
+                    <option key={item} value={item} />
+                  ))}
+                </datalist>
+
+                {cityGoodSearch && (
+                  <button
+                    type="button"
+                    className="city-good-filter-clear"
+                    onClick={() => setCityGoodSearch('')}
+                    aria-label="Clear buy-good search"
+                    title="Clear"
+                  >
+                    ×
+                  </button>
+                )}
+              </label>
+            )}
+
+            {showCityLayer && hasCityGoodSearch && (
+              <span className="map-filter-summary">
+                {highlightedBuyCityNames.size} buy city{highlightedBuyCityNames.size === 1 ? '' : 'ies'} match
+              </span>
+            )}
+          </div>
+
+          {showMapSettings && (
+            <div className="map-settings-drawer">
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
               <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
-              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
-
-              <select
-                className="input"
-                value={trailWindow}
-                onChange={(event) => setTrailWindow(event.target.value)}
-                style={{ width: 150 }}
-                title="Trail duration"
-              >
-                <option value="30m">Trail: 30 min</option>
-                <option value="2h">Trail: 2 hours</option>
-                <option value="session">Trail: session</option>
-              </select>
-
-              {showCityLayer && (
-                <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
-                  <span>Buy good</span>
-                  <input
-                    className="input city-good-filter-input"
-                    value={cityGoodSearch}
-                    onChange={(event) => setCityGoodSearch(event.target.value)}
-                    placeholder="Example: Diamond"
-                  />
-
-                  {cityGoodSearch && (
-                    <button
-                      type="button"
-                      className="city-good-filter-clear"
-                      onClick={() => setCityGoodSearch('')}
-                      aria-label="Clear buy-good search"
-                      title="Clear"
-                    >
-                      ×
-                    </button>
-                  )}
-                </label>
-              )}
             </div>
-          </div>
+          )}
         </div>
 
         <div
           ref={stageRef}
-          className={`map-stage fullscreen-map-stage wrapped-map-stage ${showCityLayer && selectedCity ? 'city-side-panel-open' : ''}`}
+          className={`map-stage fullscreen-map-stage wrapped-map-stage ${isFullBrowserMap ? 'map-stage-full-browser' : ''} ${showCityLayer && selectedCity ? 'city-side-panel-open' : ''}`}
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseUp={endDrag}
