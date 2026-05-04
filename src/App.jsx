@@ -499,10 +499,23 @@ function SettingsTab({
     <div className="stack">
       <Card className="dark-panel">
         <div className="card-body">
-          <h2>
-            <Settings size={24} /> OCR + Map Settings
-          </h2>
-          <p>OCR zones are saved relative to the selected game window after setup.</p>
+          <div className="tab-header">
+            <div>
+              <h2>
+                <Settings size={24} /> OCR + Map Settings
+              </h2>
+              <p>OCR zones are saved relative to the selected game window after setup.</p>
+            </div>
+
+            <Button
+              variant="secondary"
+              onClick={() => {
+                window.open('/?calibration=1', '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <Crosshair size={16} /> Open OCR calibration overlay
+            </Button>
+          </div>
         </div>
       </Card>
 
