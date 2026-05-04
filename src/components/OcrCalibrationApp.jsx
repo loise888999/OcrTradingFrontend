@@ -312,8 +312,7 @@ export default function OcrCalibrationApp() {
   const [captureUrl, setCaptureUrl] = useState('');
   const [captureSize, setCaptureSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [screenOffset, setScreenOffset] = useState({ x: 0, y: 0 });
-  const [autoUseGameWindowOffset, setAutoUseGameWindowOffset] = useState(true);
+  const screenOffset = { x: 0, y: 0 };
   const [drag, setDrag] = useState(null);
   const [message, setMessage] = useState('');
   const [testResult, setTestResult] = useState(null);
@@ -379,16 +378,6 @@ export default function OcrCalibrationApp() {
     });
   }, []);
 
-  const applyGameWindowOffset = useCallback((windowInfo) => {
-    if (!windowInfo) return;
-
-    const nextOffset = getGameWindowOffset(windowInfo);
-
-    setScreenOffset((current) =>
-      sameOffset(current, nextOffset)
-        ? current
-        : nextOffset);
-  }, []);
 
   const refreshGameWindow = useCallback(async () => {
     try {
@@ -396,14 +385,11 @@ export default function OcrCalibrationApp() {
       const windowInfo = await ocrLayoutApi.getGameWindow();
       setGameWindow(windowInfo);
 
-      if (autoUseGameWindowOffset) {
-        applyGameWindowOffset(windowInfo);
-      }
     } catch (err) {
       setGameWindow(null);
       setGameWindowError(err?.message || 'Game window not found.');
     }
-  }, [applyGameWindowOffset, autoUseGameWindowOffset]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -433,11 +419,6 @@ export default function OcrCalibrationApp() {
     };
   }, [refreshGameWindow]);
 
-  useEffect(() => {
-    if (autoUseGameWindowOffset && gameWindow) {
-      applyGameWindowOffset(gameWindow);
-    }
-  }, [applyGameWindowOffset, autoUseGameWindowOffset, gameWindow]);
 
   useEffect(() => {
     updateStageSize();
@@ -460,6 +441,34 @@ export default function OcrCalibrationApp() {
     });
   };
 
+  const resetSelectedBoxIntoView = () => {
+    const safeWidth = Math.max(20, Number(selectedBoxWithName.width || 180));
+    const safeHeight = Math.max(20, Number(selectedBoxWithName.height || 40));
+
+    const maxVisibleX = captureSize.width
+      ? screenOffset.x + Math.max(0, captureSize.width - safeWidth - 20)
+      : screenOffset.x + 20;
+
+    const maxVisibleY = captureSize.height
+      ? screenOffset.y + Math.max(0, captureSize.height - safeHeight - 20)
+      : screenOffset.y + 20;
+
+    const nextBox = {
+      ...selectedBoxWithName,
+      name: selectedBoxWithName.name || fieldNameFromSelection(selection),
+      x: Math.min(screenOffset.x + 20, maxVisibleX),
+      y: Math.min(screenOffset.y + 20, maxVisibleY),
+      width: safeWidth,
+      height: safeHeight
+    };
+
+    saveSelectedBox(nextBox);
+
+    setMessage(
+      `Reset ${boxDefinition.label} box into the visible captured game image at X ${nextBox.x}, Y ${nextBox.y}.`
+    );
+  };
+
   const selectGameUnderMouse = async () => {
     try {
       setMessage('Move your mouse over the game window. Selection will happen in 5 seconds...');
@@ -469,11 +478,7 @@ export default function OcrCalibrationApp() {
       setGameWindow(selected);
       setGameWindowError('');
 
-      if (autoUseGameWindowOffset) {
-        applyGameWindowOffset(selected);
-      }
-
-      setMessage('Game window selected in backend and offset applied. Now capture the same game/window in the overlay helper.');
+      setMessage('Game window selected in backend. The backend will apply the current window offset automatically when OCR is tested.');
     } catch (err) {
       setGameWindow(null);
       setGameWindowError(err?.message || 'Could not select game window.');
@@ -526,9 +531,7 @@ export default function OcrCalibrationApp() {
 
       setMessage(
         `Overlay helper screenshot captured: ${canvas.width}x${canvas.height}. ` +
-        (autoUseGameWindowOffset && gameWindow
-          ? `Using game-window offset ${getGameWindowLeft(gameWindow)},${getGameWindowTop(gameWindow)}.`
-          : 'Using the manual screen offset values.')
+        'Box coordinates are saved relative to this capture; the backend applies the current game-window offset automatically.'
       );
       setTimeout(updateStageSize, 50);
     } catch (err) {
@@ -725,66 +728,14 @@ export default function OcrCalibrationApp() {
         </button>
 
         <div className="calibration-section">
-          <h2>Screen offset</h2>
+          <h2>Coordinate handling</h2>
           <p>
-            Use 0,0 for a full primary-monitor screenshot. Use the game-window offset when you captured only the game window.
+            No manual offset is needed. Boxes are saved relative to the captured game image.
+            When OCR runs, the backend finds the current selected game window and adds its current Left/Top automatically.
           </p>
-
-          <label className="calibration-checkbox">
-            <input
-              type="checkbox"
-              checked={autoUseGameWindowOffset}
-              onChange={(event) => setAutoUseGameWindowOffset(event.target.checked)}
-            />
-            Auto use selected game-window offset
-          </label>
-
-          <button
-            className="calibration-button"
-            type="button"
-            onClick={() => {
-              if (gameWindow) {
-                applyGameWindowOffset(gameWindow);
-                setMessage(`Applied game-window offset ${getGameWindowLeft(gameWindow)},${getGameWindowTop(gameWindow)}.`);
-              } else {
-                setMessage('No selected game window found yet.');
-              }
-            }}
-          >
-            Use selected game-window offset
-          </button>
-
-          <button
-            className="calibration-button"
-            type="button"
-            onClick={() => {
-              setAutoUseGameWindowOffset(false);
-              setScreenOffset({ x: 0, y: 0 });
-              setMessage('Offset reset to 0,0. Use this when the screenshot is the full primary monitor.');
-            }}
-          >
-            Use full primary-monitor offset 0,0
-          </button>
-
-          <label>
-            Offset X
-            <input
-              type="number"
-              value={screenOffset.x}
-              onChange={(event) =>
-                setScreenOffset((current) => ({ ...current, x: Number(event.target.value || 0) }))}
-            />
-          </label>
-
-          <label>
-            Offset Y
-            <input
-              type="number"
-              value={screenOffset.y}
-              onChange={(event) =>
-                setScreenOffset((current) => ({ ...current, y: Number(event.target.value || 0) }))}
-            />
-          </label>
+          <p>
+            This means moving the game window after calibration should still work, as long as the backend can find the selected game window.
+          </p>
         </div>
 
         <div className="calibration-section">
@@ -858,6 +809,14 @@ export default function OcrCalibrationApp() {
               </option>
             ))}
           </select>
+
+          <button
+            className="calibration-button"
+            type="button"
+            onClick={resetSelectedBoxIntoView}
+          >
+            Reset selected box into view
+          </button>
 
           <label>
             X
