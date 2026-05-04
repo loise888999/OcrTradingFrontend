@@ -492,6 +492,42 @@ function SelectedCityPanel({ city, goods, onClose }) {
   );
 }
 
+
+function getOcrRunningState(ocrStatus) {
+  if (!ocrStatus) return null;
+
+  const negativeWords = ['stopped', 'stop', 'idle', 'off', 'disabled', 'not running', 'notrunning', 'false'];
+  const positiveWords = ['running', 'run', 'active', 'started', 'start', 'on', 'enabled', 'capturing', 'watching'];
+  const booleanFields = ['running', 'isRunning', 'active', 'isActive', 'started', 'isStarted', 'enabled', 'isEnabled'];
+
+  for (const field of booleanFields) {
+    if (typeof ocrStatus[field] === 'boolean') {
+      return ocrStatus[field];
+    }
+  }
+
+  const rawText = [
+    ocrStatus.status,
+    ocrStatus.state,
+    ocrStatus.ocrStatus,
+    ocrStatus.message,
+    ocrStatus.mode,
+    ocrStatus.Status,
+    ocrStatus.State,
+    ocrStatus.Message
+  ]
+    .filter((value) => value !== undefined && value !== null)
+    .join(' ');
+
+  const text = normalizeName(rawText);
+  if (!text) return null;
+
+  if (negativeWords.some((word) => text.includes(word))) return false;
+  if (positiveWords.some((word) => text.includes(word))) return true;
+
+  return null;
+}
+
 export default function WrappedCoordinateMap({
   coordinates,
   cities = [],
@@ -516,9 +552,9 @@ export default function WrappedCoordinateMap({
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
-  const [showPointsLayer, setShowPointsLayer] = useState(true);
+  const [showPointsLayer, setShowPointsLayer] = useState(false);
   const [showDirectionLayer, setShowDirectionLayer] = useState(true);
-  const [showCityLayer, setShowCityLayer] = useState(false);
+  const [showCityLayer, setShowCityLayer] = useState(true);
   const [selectedCityName, setSelectedCityName] = useState('');
   const [cityGoodSearch, setCityGoodSearch] = useState('');
   const [trailWindow, setTrailWindow] = useState('2h');
@@ -659,8 +695,9 @@ export default function WrappedCoordinateMap({
   }, [prices]);
 
   const latestCityName = sanitizeCityName(latestCity?.city || latestCity?.name || latestCity?.Name || '');
-  const ocrRunning = Boolean(ocrStatus?.running ?? ocrStatus?.isRunning ?? normalizeName(ocrStatus?.status).includes('running'));
-  const ocrStatusLabel = ocrRunning ? 'Running' : (ocrStatus ? 'Stopped' : 'Unknown');
+  const ocrRunningState = getOcrRunningState(ocrStatus);
+  const ocrRunning = ocrRunningState === true;
+  const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
@@ -1086,7 +1123,7 @@ export default function WrappedCoordinateMap({
               </h2>
 
               <div className="map-status-pills">
-                <span className={`map-status-pill ${ocrRunning ? 'status-running' : 'status-stopped'}`}>
+                <span className={`map-status-pill ${ocrRunning ? 'status-running' : ocrRunningState == null ? 'status-unknown' : 'status-stopped'}`}>
                   OCR: {ocrStatusLabel}
                 </span>
                 <span className="map-status-pill status-city">
