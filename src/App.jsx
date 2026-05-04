@@ -845,6 +845,10 @@ export default function App() {
         {activeTab === 'map' && (
           <WrappedCoordinateMap
             coordinates={coordinates}
+            cities={cities}
+            prices={prices}
+            ocrStatus={ocrStatus}
+            latestCity={latestCity}
             worldWidth={settings.worldWidth}
             worldHeight={settings.worldHeight}
             xZeroOffset={settings.xZeroOffset}
