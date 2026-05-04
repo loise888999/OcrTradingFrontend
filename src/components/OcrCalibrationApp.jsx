@@ -230,6 +230,47 @@ function getWindowLabel(gameWindow) {
   );
 }
 
+function readNumber(value, names, fallback = 0) {
+  if (!value) return fallback;
+
+  for (const name of names) {
+    const found = value[name];
+    if (found !== undefined && found !== null && Number.isFinite(Number(found))) {
+      return Number(found);
+    }
+  }
+
+  return fallback;
+}
+
+function getGameWindowLeft(gameWindow) {
+  return readNumber(gameWindow, ['left', 'Left', 'x', 'X'], 0);
+}
+
+function getGameWindowTop(gameWindow) {
+  return readNumber(gameWindow, ['top', 'Top', 'y', 'Y'], 0);
+}
+
+function getGameWindowWidth(gameWindow) {
+  return readNumber(gameWindow, ['width', 'Width'], 0);
+}
+
+function getGameWindowHeight(gameWindow) {
+  return readNumber(gameWindow, ['height', 'Height'], 0);
+}
+
+function getGameWindowOffset(gameWindow) {
+  return {
+    x: getGameWindowLeft(gameWindow),
+    y: getGameWindowTop(gameWindow)
+  };
+}
+
+function sameOffset(a, b) {
+  return Number(a?.x || 0) === Number(b?.x || 0) &&
+    Number(a?.y || 0) === Number(b?.y || 0);
+}
+
 function GameWindowStatus({ gameWindow, gameWindowError, captureSize, captureUrl }) {
   const hasGameWindow = Boolean(gameWindow);
   const hasOverlayCapture = Boolean(captureUrl);
@@ -243,8 +284,9 @@ function GameWindowStatus({ gameWindow, gameWindowError, captureSize, captureUrl
           {hasGameWindow && (
             <small>
               {getWindowLabel(gameWindow)}
-              {gameWindow.left !== undefined && gameWindow.top !== undefined
-                ? ` · ${gameWindow.left},${gameWindow.top}`
+              {` · ${getGameWindowLeft(gameWindow)},${getGameWindowTop(gameWindow)}`}
+              {getGameWindowWidth(gameWindow) && getGameWindowHeight(gameWindow)
+                ? ` · ${getGameWindowWidth(gameWindow)}×${getGameWindowHeight(gameWindow)}`
                 : ''}
             </small>
           )}
@@ -271,6 +313,7 @@ export default function OcrCalibrationApp() {
   const [captureSize, setCaptureSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [screenOffset, setScreenOffset] = useState({ x: 0, y: 0 });
+  const [autoUseGameWindowOffset, setAutoUseGameWindowOffset] = useState(true);
   const [drag, setDrag] = useState(null);
   const [message, setMessage] = useState('');
   const [testResult, setTestResult] = useState(null);
@@ -336,16 +379,31 @@ export default function OcrCalibrationApp() {
     });
   }, []);
 
+  const applyGameWindowOffset = useCallback((windowInfo) => {
+    if (!windowInfo) return;
+
+    const nextOffset = getGameWindowOffset(windowInfo);
+
+    setScreenOffset((current) =>
+      sameOffset(current, nextOffset)
+        ? current
+        : nextOffset);
+  }, []);
+
   const refreshGameWindow = useCallback(async () => {
     try {
       setGameWindowError('');
       const windowInfo = await ocrLayoutApi.getGameWindow();
       setGameWindow(windowInfo);
+
+      if (autoUseGameWindowOffset) {
+        applyGameWindowOffset(windowInfo);
+      }
     } catch (err) {
       setGameWindow(null);
       setGameWindowError(err?.message || 'Game window not found.');
     }
-  }, []);
+  }, [applyGameWindowOffset, autoUseGameWindowOffset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -376,6 +434,12 @@ export default function OcrCalibrationApp() {
   }, [refreshGameWindow]);
 
   useEffect(() => {
+    if (autoUseGameWindowOffset && gameWindow) {
+      applyGameWindowOffset(gameWindow);
+    }
+  }, [applyGameWindowOffset, autoUseGameWindowOffset, gameWindow]);
+
+  useEffect(() => {
     updateStageSize();
     window.addEventListener('resize', updateStageSize);
 
@@ -404,7 +468,12 @@ export default function OcrCalibrationApp() {
 
       setGameWindow(selected);
       setGameWindowError('');
-      setMessage('Game window selected in backend. Now capture the same game/window in the overlay helper.');
+
+      if (autoUseGameWindowOffset) {
+        applyGameWindowOffset(selected);
+      }
+
+      setMessage('Game window selected in backend and offset applied. Now capture the same game/window in the overlay helper.');
     } catch (err) {
       setGameWindow(null);
       setGameWindowError(err?.message || 'Could not select game window.');
@@ -455,7 +524,12 @@ export default function OcrCalibrationApp() {
         screenHeight: canvas.height
       }));
 
-      setMessage(`Overlay helper screenshot captured: ${canvas.width}x${canvas.height}.`);
+      setMessage(
+        `Overlay helper screenshot captured: ${canvas.width}x${canvas.height}. ` +
+        (autoUseGameWindowOffset && gameWindow
+          ? `Using game-window offset ${getGameWindowLeft(gameWindow)},${getGameWindowTop(gameWindow)}.`
+          : 'Using the manual screen offset values.')
+      );
       setTimeout(updateStageSize, 50);
     } catch (err) {
       setMessage(`Screen capture failed: ${err?.message || 'Unknown error'}`);
@@ -653,8 +727,44 @@ export default function OcrCalibrationApp() {
         <div className="calibration-section">
           <h2>Screen offset</h2>
           <p>
-            Use 0,0 for primary monitor. For a secondary monitor, set its global top-left offset.
+            Use 0,0 for a full primary-monitor screenshot. Use the game-window offset when you captured only the game window.
           </p>
+
+          <label className="calibration-checkbox">
+            <input
+              type="checkbox"
+              checked={autoUseGameWindowOffset}
+              onChange={(event) => setAutoUseGameWindowOffset(event.target.checked)}
+            />
+            Auto use selected game-window offset
+          </label>
+
+          <button
+            className="calibration-button"
+            type="button"
+            onClick={() => {
+              if (gameWindow) {
+                applyGameWindowOffset(gameWindow);
+                setMessage(`Applied game-window offset ${getGameWindowLeft(gameWindow)},${getGameWindowTop(gameWindow)}.`);
+              } else {
+                setMessage('No selected game window found yet.');
+              }
+            }}
+          >
+            Use selected game-window offset
+          </button>
+
+          <button
+            className="calibration-button"
+            type="button"
+            onClick={() => {
+              setAutoUseGameWindowOffset(false);
+              setScreenOffset({ x: 0, y: 0 });
+              setMessage('Offset reset to 0,0. Use this when the screenshot is the full primary monitor.');
+            }}
+          >
+            Use full primary-monitor offset 0,0
+          </button>
 
           <label>
             Offset X
