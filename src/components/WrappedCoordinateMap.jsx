@@ -364,9 +364,9 @@ function Toggle({ checked, onChange, label }) {
   );
 }
 
-function CityGoodsColumn({ title, rows, emptyMessage }) {
+function CityGoodsColumn({ title, rows, emptyMessage, tone = 'default' }) {
   return (
-    <div className="city-goods-column">
+    <div className={`city-goods-column city-goods-column-${tone}`}>
       <h4>{title}</h4>
 
       {rows.length === 0 ? (
@@ -403,15 +403,15 @@ function SelectedCityPanel({ city, goods, onClose }) {
     if (!panel) return undefined;
 
     const stopNativeWheel = (event) => {
-      // Do not call preventDefault here. The panel/list still needs to scroll.
-      // This only stops the map stage native wheel listener from zooming the map.
+      // Do not call preventDefault here. The panel still needs to scroll.
+      // Capture + stopPropagation prevents the map stage native wheel listener from zooming the map.
       event.stopPropagation();
     };
 
-    panel.addEventListener('wheel', stopNativeWheel, { passive: true });
+    panel.addEventListener('wheel', stopNativeWheel, { passive: false, capture: true });
 
     return () => {
-      panel.removeEventListener('wheel', stopNativeWheel);
+      panel.removeEventListener('wheel', stopNativeWheel, { capture: true });
     };
   }, []);
 
@@ -464,12 +464,14 @@ function SelectedCityPanel({ city, goods, onClose }) {
           title="Buy"
           rows={buyGoods}
           emptyMessage="No Buy records found for this city yet."
+          tone="buy"
         />
 
         <CityGoodsColumn
           title="Sell"
           rows={sellGoods}
           emptyMessage="No Sell records found for this city yet."
+          tone="sell"
         />
       </div>
 
@@ -478,6 +480,7 @@ function SelectedCityPanel({ city, goods, onClose }) {
           title="Other known records"
           rows={otherGoods}
           emptyMessage="No other records."
+          tone="default"
         />
       )}
     </aside>
@@ -508,6 +511,7 @@ export default function WrappedCoordinateMap({
   const [showDirectionLayer, setShowDirectionLayer] = useState(true);
   const [showCityLayer, setShowCityLayer] = useState(false);
   const [selectedCityName, setSelectedCityName] = useState('');
+  const [cityGoodSearch, setCityGoodSearch] = useState('');
   const [trailWindow, setTrailWindow] = useState('2h');
 
   const [sessionTrailRaw, setSessionTrailRaw] = useState([]);
@@ -526,7 +530,10 @@ export default function WrappedCoordinateMap({
   }, [pan]);
 
   useEffect(() => {
-    if (!showCityLayer) setSelectedCityName('');
+    if (!showCityLayer) {
+      setSelectedCityName('');
+      setCityGoodSearch('');
+    }
   }, [showCityLayer]);
 
   const current = coordinates[coordinates.length - 1];
@@ -589,6 +596,26 @@ export default function WrappedCoordinateMap({
     () => buildLatestCityGoods(prices, selectedCityName),
     [prices, selectedCityName]
   );
+
+  const cityGoodSearchQuery = cityGoodSearch.trim();
+  const hasCityGoodSearch = cityGoodSearchQuery.length > 0;
+
+  const highlightedBuyCityNames = useMemo(() => {
+    const query = normalizeName(cityGoodSearchQuery);
+    const matches = new Set();
+
+    if (!query) return matches;
+
+    for (const row of prices || []) {
+      if (normalizeName(getPriceTradeType(row)) !== 'buy') continue;
+      if (!normalizeName(getPriceItem(row)).includes(query)) continue;
+
+      const cityName = getPriceCity(row);
+      if (cityName) matches.add(normalizeName(cityName));
+    }
+
+    return matches;
+  }, [prices, cityGoodSearchQuery]);
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
@@ -894,23 +921,52 @@ export default function WrappedCoordinateMap({
     return (
       <g className="city-map-layer">
         {visibleCityMarkers.map((marker) => {
-          const selected = normalizeName(marker.name) === normalizeName(selectedCityName);
-          const radius = selected ? selectedCityPointRadius : cityPointRadius;
+          const normalizedCityName = normalizeName(marker.name);
+          const selected = normalizedCityName === normalizeName(selectedCityName);
+          const buyGoodMatch = hasCityGoodSearch && highlightedBuyCityNames.has(normalizedCityName);
+          const mutedBySearch = hasCityGoodSearch && !buyGoodMatch;
+          const radius = selected
+            ? selectedCityPointRadius
+            : buyGoodMatch
+              ? cityPointRadius * 1.15
+              : mutedBySearch
+                ? cityPointRadius * 0.62
+                : cityPointRadius;
+
+          const markerClassName = [
+            'city-map-marker',
+            selected ? 'selected' : '',
+            buyGoodMatch ? 'buy-good-match' : '',
+            mutedBySearch ? 'buy-good-muted' : ''
+          ].filter(Boolean).join(' ');
+
+          const dotClassName = [
+            'city-map-dot',
+            selected ? 'city-map-dot-selected' : '',
+            buyGoodMatch ? 'city-map-dot-buy-match' : '',
+            mutedBySearch ? 'city-map-dot-muted' : ''
+          ].filter(Boolean).join(' ');
 
           return (
             <g
               key={`city-${marker.renderKey}`}
-              className={`city-map-marker ${selected ? 'selected' : ''}`}
+              className={markerClassName}
               onMouseUp={(event) => selectCityFromCleanClick(event, marker.city)}
             >
               <circle
                 cx={marker.renderX}
                 cy={marker.renderY}
                 r={radius}
-                className={`city-map-dot ${selected ? 'city-map-dot-selected' : ''}`}
+                className={dotClassName}
               />
 
-              <title>{marker.name}</title>
+              <title>
+                {hasCityGoodSearch
+                  ? buyGoodMatch
+                    ? `${marker.name} buys ${cityGoodSearchQuery}`
+                    : marker.name
+                  : marker.name}
+              </title>
             </g>
           );
         })}
@@ -1029,6 +1085,30 @@ export default function WrappedCoordinateMap({
                 <option value="2h">Trail: 2 hours</option>
                 <option value="session">Trail: session</option>
               </select>
+
+              {showCityLayer && (
+                <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
+                  <span>Buy good</span>
+                  <input
+                    className="input city-good-filter-input"
+                    value={cityGoodSearch}
+                    onChange={(event) => setCityGoodSearch(event.target.value)}
+                    placeholder="Example: Diamond"
+                  />
+
+                  {cityGoodSearch && (
+                    <button
+                      type="button"
+                      className="city-good-filter-clear"
+                      onClick={() => setCityGoodSearch('')}
+                      aria-label="Clear buy-good search"
+                      title="Clear"
+                    >
+                      ×
+                    </button>
+                  )}
+                </label>
+              )}
             </div>
           </div>
         </div>
@@ -1065,6 +1145,9 @@ export default function WrappedCoordinateMap({
             </span>
             <span>Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span>City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
+            {showCityLayer && hasCityGoodSearch && (
+              <span>Buy good matches: {highlightedBuyCityNames.size}</span>
+            )}
           </div>
 
           {showCityLayer && selectedCity && (
