@@ -1,12 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ocrLayoutApi } from '../ocrLayoutApi.js';
 
-const BOX_TEMPLATES = [
+const BASE_BOXES = [
   { id: 'city', label: 'City', path: ['zones', 'city'], color: '#22c55e' },
   { id: 'coordinate', label: 'Coordinate', path: ['zones', 'coordinate'], color: '#38bdf8' },
   { id: 'buyValidationBox', label: 'Buy validation', path: ['price', 'buyValidationBox'], color: '#facc15' },
   { id: 'sellValidationBox', label: 'Sell validation', path: ['price', 'sellValidationBox'], color: '#fb923c' }
 ];
+
+function createRows(count) {
+  const safeCount = Math.max(1, Math.min(20, Number(count || 4)));
+  const startY = 380;
+  const rowGap = 45;
+
+  return Array.from({ length: safeCount }, (_, index) => {
+    const row = index + 1;
+    const y = startY + index * rowGap;
+
+    return {
+      index: row,
+      enabled: true,
+      itemName: { name: `Row${row}ItemName`, x: 820, y, width: 260, height: 35 },
+      price: { name: `Row${row}Price`, x: 1160, y, width: 100, height: 35 },
+      multiplier: { name: `Row${row}Multiplier`, x: 1270, y, width: 90, height: 35 }
+    };
+  });
+}
 
 function createDefaultLayout() {
   return {
@@ -31,27 +50,9 @@ function createDefaultLayout() {
   };
 }
 
-function createRows(count) {
-  const safeCount = Math.max(1, Math.min(20, Number(count || 4)));
-  const startY = 380;
-  const rowGap = 45;
-
-  return Array.from({ length: safeCount }, (_, index) => {
-    const row = index + 1;
-    const y = startY + index * rowGap;
-
-    return {
-      index: row,
-      enabled: true,
-      itemName: { name: `Row${row}ItemName`, x: 820, y, width: 260, height: 35 },
-      price: { name: `Row${row}Price`, x: 1160, y, width: 100, height: 35 },
-      multiplier: { name: `Row${row}Multiplier`, x: 1270, y, width: 90, height: 35 }
-    };
-  });
-}
-
 function normalizeLayout(layout) {
   const base = createDefaultLayout();
+
   const merged = {
     ...base,
     ...(layout || {}),
@@ -69,7 +70,6 @@ function normalizeLayout(layout) {
   };
 
   merged.price.visibleRows = Math.max(1, Math.min(20, Number(merged.price.visibleRows || 4)));
-
   return merged;
 }
 
@@ -86,9 +86,8 @@ function setAtPath(obj, path, value) {
   let current = copy;
 
   for (let i = 0; i < path.length - 1; i += 1) {
-    const key = path[i];
-    current[key] = current[key] || {};
-    current = current[key];
+    current[path[i]] = current[path[i]] || {};
+    current = current[path[i]];
   }
 
   current[path[path.length - 1]] = value;
@@ -110,12 +109,28 @@ function updateRowBox(layout, rowIndex, field, box) {
       price: null,
       multiplier: null
     };
+
     copy.price.rows.push(row);
     copy.price.rows.sort((a, b) => Number(a.index) - Number(b.index));
   }
 
   row[field] = box;
   return copy;
+}
+
+function fieldNameFromSelection(selection) {
+  if (selection === 'city') return 'City';
+  if (selection === 'coordinate') return 'Coordinate';
+  if (selection === 'buyValidationBox') return 'BuyValidation';
+  if (selection === 'sellValidationBox') return 'SellValidation';
+
+  if (selection.startsWith('row-')) {
+    const [, row, field] = selection.split('-');
+    const suffix = field === 'itemName' ? 'ItemName' : field === 'price' ? 'Price' : 'Multiplier';
+    return `Row${row}${suffix}`;
+  }
+
+  return selection;
 }
 
 function getBoxDefinition(selection, layout) {
@@ -130,18 +145,18 @@ function getBoxDefinition(selection, layout) {
       label: `Row ${rowIndex} ${fieldLabel}`,
       color: field === 'itemName' ? '#a855f7' : field === 'price' ? '#ef4444' : '#14b8a6',
       box: row?.[field],
-      save: (nextLayout, box) => updateRowBox(nextLayout, rowIndex, field, box),
-      kind: selection
+      kind: selection,
+      save: (nextLayout, box) => updateRowBox(nextLayout, rowIndex, field, box)
     };
   }
 
-  const template = BOX_TEMPLATES.find((item) => item.id === selection) || BOX_TEMPLATES[0];
+  const template = BASE_BOXES.find((item) => item.id === selection) || BASE_BOXES[0];
 
   return {
     ...template,
     box: getAtPath(layout, template.path),
-    save: (nextLayout, box) => setAtPath(nextLayout, template.path, box),
-    kind: template.id
+    kind: template.id,
+    save: (nextLayout, box) => setAtPath(nextLayout, template.path, box)
   };
 }
 
@@ -164,21 +179,6 @@ function toLayoutBox(rect, scale, offsetX = 0, offsetY = 0, name = '') {
     width: Math.max(1, Math.round(rect.width / safeScale)),
     height: Math.max(1, Math.round(rect.height / safeScale))
   };
-}
-
-function fieldNameFromSelection(selection) {
-  if (selection === 'city') return 'City';
-  if (selection === 'coordinate') return 'Coordinate';
-  if (selection === 'buyValidationBox') return 'BuyValidation';
-  if (selection === 'sellValidationBox') return 'SellValidation';
-
-  if (selection.startsWith('row-')) {
-    const [, row, field] = selection.split('-');
-    const suffix = field === 'itemName' ? 'ItemName' : field === 'price' ? 'Price' : 'Multiplier';
-    return `Row${row}${suffix}`;
-  }
-
-  return selection;
 }
 
 function copyBoxFromFirstRow(layout, rowCount, rowGap) {
@@ -218,8 +218,51 @@ function copyBoxFromFirstRow(layout, rowCount, rowGap) {
   return copy;
 }
 
+function getWindowLabel(gameWindow) {
+  if (!gameWindow) return '';
+
+  return (
+    gameWindow.title ||
+    gameWindow.processName ||
+    gameWindow.windowTitle ||
+    gameWindow.name ||
+    'Game window'
+  );
+}
+
+function GameWindowStatus({ gameWindow, gameWindowError, captureSize, captureUrl }) {
+  const hasGameWindow = Boolean(gameWindow);
+  const hasOverlayCapture = Boolean(captureUrl);
+
+  return (
+    <div className="calibration-status-wrapper">
+      <div className="calibration-status-grid">
+        <div className={`calibration-status-card ${hasGameWindow ? 'ok' : 'bad'}`}>
+          <strong>Main app game selection</strong>
+          <span>{hasGameWindow ? 'Selected / found' : 'Not selected / not found'}</span>
+          {hasGameWindow && (
+            <small>
+              {getWindowLabel(gameWindow)}
+              {gameWindow.left !== undefined && gameWindow.top !== undefined
+                ? ` · ${gameWindow.left},${gameWindow.top}`
+                : ''}
+            </small>
+          )}
+        </div>
+
+        <div className={`calibration-status-card ${hasOverlayCapture ? 'ok' : 'bad'}`}>
+          <strong>Overlay helper capture</strong>
+          <span>{hasOverlayCapture ? 'Screenshot loaded' : 'No screenshot yet'}</span>
+          {hasOverlayCapture && <small>{captureSize.width} × {captureSize.height}</small>}
+        </div>
+      </div>
+
+      {gameWindowError && <p className="calibration-error">{gameWindowError}</p>}
+    </div>
+  );
+}
+
 export default function OcrCalibrationApp() {
-  const imageRef = useRef(null);
   const stageRef = useRef(null);
 
   const [layout, setLayout] = useState(createDefaultLayout());
@@ -235,6 +278,8 @@ export default function OcrCalibrationApp() {
   const [rowGap, setRowGap] = useState(45);
   const [isSaving, setIsSaving] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [gameWindow, setGameWindow] = useState(null);
+  const [gameWindowError, setGameWindowError] = useState('');
 
   const boxDefinition = useMemo(
     () => getBoxDefinition(selection, layout),
@@ -249,10 +294,13 @@ export default function OcrCalibrationApp() {
     return Math.min(stageSize.width / captureSize.width, stageSize.height / captureSize.height);
   }, [captureSize, stageSize]);
 
-  const imageDisplaySize = useMemo(() => ({
-    width: captureSize.width * scale,
-    height: captureSize.height * scale
-  }), [captureSize, scale]);
+  const imageDisplaySize = useMemo(
+    () => ({
+      width: captureSize.width * scale,
+      height: captureSize.height * scale
+    }),
+    [captureSize, scale]
+  );
 
   const selectedBox = boxDefinition.box || {
     name: fieldNameFromSelection(selection),
@@ -262,7 +310,20 @@ export default function OcrCalibrationApp() {
     height: 40
   };
 
-  const screenBox = toScreenBox(selectedBox, scale, screenOffset.x, screenOffset.y);
+  const selectedBoxWithName = useMemo(
+    () => ({
+      ...selectedBox,
+      name: selectedBox.name || fieldNameFromSelection(selection)
+    }),
+    [selectedBox, selection]
+  );
+
+  const screenBox = toScreenBox(
+    selectedBoxWithName,
+    scale,
+    screenOffset.x,
+    screenOffset.y
+  );
 
   const updateStageSize = useCallback(() => {
     const element = stageRef.current;
@@ -275,45 +336,58 @@ export default function OcrCalibrationApp() {
     });
   }, []);
 
+  const refreshGameWindow = useCallback(async () => {
+    try {
+      setGameWindowError('');
+      const windowInfo = await ocrLayoutApi.getGameWindow();
+      setGameWindow(windowInfo);
+    } catch (err) {
+      setGameWindow(null);
+      setGameWindowError(err?.message || 'Game window not found.');
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
         const loaded = await ocrLayoutApi.getLayout();
-        if (!cancelled) {
-          const normalized = normalizeLayout(loaded);
-          setLayout(normalized);
-          setRowCount(Number(normalized.price.visibleRows || 4));
-          setMessage('Loaded OCR layout from backend.');
-        }
+
+        if (cancelled) return;
+
+        const normalized = normalizeLayout(loaded);
+        setLayout(normalized);
+        setRowCount(Number(normalized.price.visibleRows || 4));
+        setMessage('Loaded OCR layout from backend.');
       } catch (err) {
         if (!cancelled) {
-          setMessage(`Could not load layout: ${err.message}`);
+          setMessage(`Could not load layout: ${err?.message || 'Unknown error'}`);
         }
       }
     }
 
     load();
+    refreshGameWindow();
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshGameWindow]);
 
   useEffect(() => {
     updateStageSize();
     window.addEventListener('resize', updateStageSize);
+
     return () => window.removeEventListener('resize', updateStageSize);
   }, [updateStageSize]);
 
-  const selectedBoxWithName = useMemo(() => ({
-    ...selectedBox,
-    name: selectedBox.name || fieldNameFromSelection(selection)
-  }), [selectedBox, selection]);
-
-  const saveSelectedBox = useCallback((box) => {
-    setLayout((current) => boxDefinition.save(current, box));
-  }, [boxDefinition]);
+  const saveSelectedBox = useCallback(
+    (box) => {
+      setLayout((current) => boxDefinition.save(current, box));
+    },
+    [boxDefinition]
+  );
 
   const updateSelectedBoxNumber = (key, value) => {
     saveSelectedBox({
@@ -322,15 +396,29 @@ export default function OcrCalibrationApp() {
     });
   };
 
+  const selectGameUnderMouse = async () => {
+    try {
+      setMessage('Move your mouse over the game window. Selection will happen in 5 seconds...');
+
+      const selected = await ocrLayoutApi.selectWindowUnderMouseDelayed({ seconds: 5 });
+
+      setGameWindow(selected);
+      setGameWindowError('');
+      setMessage('Game window selected in backend. Now capture the same game/window in the overlay helper.');
+    } catch (err) {
+      setGameWindow(null);
+      setGameWindowError(err?.message || 'Could not select game window.');
+      setMessage(`Could not select game window: ${err?.message || 'Unknown error'}`);
+    }
+  };
+
   const startScreenCapture = async () => {
     try {
-      setMessage('');
+      setMessage('Choose the same game window or monitor that is selected in the main app.');
       setIsCapturing(true);
 
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: 'always'
-        },
+        video: { cursor: 'always' },
         audio: false
       });
 
@@ -340,11 +428,8 @@ export default function OcrCalibrationApp() {
       await video.play();
 
       await new Promise((resolve) => {
-        if (video.videoWidth > 0) {
-          resolve();
-        } else {
-          video.onloadedmetadata = resolve;
-        }
+        if (video.videoWidth > 0) resolve();
+        else video.onloadedmetadata = resolve;
       });
 
       const canvas = document.createElement('canvas');
@@ -363,19 +448,17 @@ export default function OcrCalibrationApp() {
         width: canvas.width,
         height: canvas.height
       });
+
       setLayout((current) => ({
         ...current,
         screenWidth: canvas.width,
         screenHeight: canvas.height
       }));
 
-      setMessage(
-        `Captured ${canvas.width}x${canvas.height}. If this is a secondary monitor, set Screen offset X/Y before saving boxes.`
-      );
-
+      setMessage(`Overlay helper screenshot captured: ${canvas.width}x${canvas.height}.`);
       setTimeout(updateStageSize, 50);
     } catch (err) {
-      setMessage(`Screen capture failed: ${err.message}`);
+      setMessage(`Screen capture failed: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsCapturing(false);
     }
@@ -402,27 +485,35 @@ export default function OcrCalibrationApp() {
 
       let next = { ...drag.original };
 
+      // IMPORTANT:
+      // Do not use string checks like mode.includes('e') for "move".
+      // The word "move" contains "e", which caused the box width to change while dragging.
       if (drag.mode === 'move') {
-        next.left += dx;
-        next.top += dy;
-      }
+        next = {
+          ...next,
+          left: drag.original.left + dx,
+          top: drag.original.top + dy,
+          width: drag.original.width,
+          height: drag.original.height
+        };
+      } else {
+        if (drag.mode.includes('e')) {
+          next.width = Math.max(8, drag.original.width + dx);
+        }
 
-      if (drag.mode.includes('e')) {
-        next.width = Math.max(8, drag.original.width + dx);
-      }
+        if (drag.mode.includes('s')) {
+          next.height = Math.max(8, drag.original.height + dy);
+        }
 
-      if (drag.mode.includes('s')) {
-        next.height = Math.max(8, drag.original.height + dy);
-      }
+        if (drag.mode.includes('w')) {
+          next.left = drag.original.left + dx;
+          next.width = Math.max(8, drag.original.width - dx);
+        }
 
-      if (drag.mode.includes('w')) {
-        next.left = drag.original.left + dx;
-        next.width = Math.max(8, drag.original.width - dx);
-      }
-
-      if (drag.mode.includes('n')) {
-        next.top = drag.original.top + dy;
-        next.height = Math.max(8, drag.original.height - dy);
+        if (drag.mode.includes('n')) {
+          next.top = drag.original.top + dy;
+          next.height = Math.max(8, drag.original.height - dy);
+        }
       }
 
       const box = toLayoutBox(
@@ -445,7 +536,15 @@ export default function OcrCalibrationApp() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [drag, scale, screenOffset.x, screenOffset.y, saveSelectedBox, selectedBoxWithName.name, selection]);
+  }, [
+    drag,
+    scale,
+    screenOffset.x,
+    screenOffset.y,
+    saveSelectedBox,
+    selectedBoxWithName.name,
+    selection
+  ]);
 
   const testSelectedBox = async () => {
     try {
@@ -461,7 +560,7 @@ export default function OcrCalibrationApp() {
       setTestResult(result);
       setMessage('Box tested.');
     } catch (err) {
-      setMessage(`Test failed: ${err.message}`);
+      setMessage(`Test failed: ${err?.message || 'Unknown error'}`);
     }
   };
 
@@ -474,7 +573,7 @@ export default function OcrCalibrationApp() {
       setLayout(normalizeLayout(saved));
       setMessage('Layout saved to backend local layout file.');
     } catch (err) {
-      setMessage(`Save failed: ${err.message}`);
+      setMessage(`Save failed: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }
@@ -500,16 +599,15 @@ export default function OcrCalibrationApp() {
       .slice()
       .sort((a, b) => Number(a.index) - Number(b.index))
       .flatMap((row) => [
-        { id: `row-${row.index}-itemName`, label: `Row ${row.index} item`, color: '#a855f7' },
-        { id: `row-${row.index}-price`, label: `Row ${row.index} price`, color: '#ef4444' },
-        { id: `row-${row.index}-multiplier`, label: `Row ${row.index} multiplier`, color: '#14b8a6' }
+        { id: `row-${row.index}-itemName`, label: `Row ${row.index} item` },
+        { id: `row-${row.index}-price`, label: `Row ${row.index} price` },
+        { id: `row-${row.index}-multiplier`, label: `Row ${row.index} multiplier` }
       ]);
 
     return [
-      ...BOX_TEMPLATES.map((box) => ({
+      ...BASE_BOXES.map((box) => ({
         id: box.id,
-        label: box.label,
-        color: box.color
+        label: box.label
       })),
       ...rows
     ];
@@ -522,9 +620,23 @@ export default function OcrCalibrationApp() {
       <aside className="calibration-sidebar">
         <h1>OCR Calibration</h1>
         <p>
-          Cross-platform editor: capture your screen/window, move the boxes on the screenshot,
-          then save the layout to the backend.
+          Capture the game/window, then drag and resize exact OCR boxes.
         </p>
+
+        <GameWindowStatus
+          gameWindow={gameWindow}
+          gameWindowError={gameWindowError}
+          captureSize={captureSize}
+          captureUrl={captureUrl}
+        />
+
+        <button className="calibration-button" onClick={refreshGameWindow}>
+          Refresh main app game status
+        </button>
+
+        <button className="calibration-button" onClick={selectGameUnderMouse}>
+          Redo game selection here, under mouse in 5s
+        </button>
 
         <button className="calibration-button primary" onClick={startScreenCapture} disabled={isCapturing}>
           {isCapturing ? 'Capturing...' : 'Capture screen / game window'}
@@ -534,7 +646,7 @@ export default function OcrCalibrationApp() {
           {isSaving ? 'Saving...' : 'Save layout'}
         </button>
 
-        <button className="calibration-button" onClick={() => window.location.href = '/'}>
+        <button className="calibration-button" onClick={() => { window.location.href = '/'; }}>
           Back to main app
         </button>
 
@@ -549,7 +661,8 @@ export default function OcrCalibrationApp() {
             <input
               type="number"
               value={screenOffset.x}
-              onChange={(event) => setScreenOffset((current) => ({ ...current, x: Number(event.target.value || 0) }))}
+              onChange={(event) =>
+                setScreenOffset((current) => ({ ...current, x: Number(event.target.value || 0) }))}
             />
           </label>
 
@@ -558,7 +671,8 @@ export default function OcrCalibrationApp() {
             <input
               type="number"
               value={screenOffset.y}
-              onChange={(event) => setScreenOffset((current) => ({ ...current, y: Number(event.target.value || 0) }))}
+              onChange={(event) =>
+                setScreenOffset((current) => ({ ...current, y: Number(event.target.value || 0) }))}
             />
           </label>
         </div>
@@ -570,7 +684,8 @@ export default function OcrCalibrationApp() {
             <input
               type="checkbox"
               checked={Boolean(layout.useLayoutForCity)}
-              onChange={(event) => setLayout((current) => ({ ...current, useLayoutForCity: event.target.checked }))}
+              onChange={(event) =>
+                setLayout((current) => ({ ...current, useLayoutForCity: event.target.checked }))}
             />
             Use layout for City
           </label>
@@ -579,7 +694,8 @@ export default function OcrCalibrationApp() {
             <input
               type="checkbox"
               checked={Boolean(layout.useLayoutForCoordinate)}
-              onChange={(event) => setLayout((current) => ({ ...current, useLayoutForCoordinate: event.target.checked }))}
+              onChange={(event) =>
+                setLayout((current) => ({ ...current, useLayoutForCoordinate: event.target.checked }))}
             />
             Use layout for Coordinate
           </label>
@@ -674,11 +790,7 @@ export default function OcrCalibrationApp() {
           </button>
         </div>
 
-        {message && (
-          <div className="calibration-message">
-            {message}
-          </div>
-        )}
+        {message && <div className="calibration-message">{message}</div>}
 
         {testResult && (
           <div className="calibration-result">
@@ -693,11 +805,9 @@ export default function OcrCalibrationApp() {
         <div className="calibration-toolbar">
           <strong>{boxDefinition.label}</strong>
           <span>
-            Box: X {selectedBoxWithName.x}, Y {selectedBoxWithName.y}, W {selectedBoxWithName.width}, H {selectedBoxWithName.height}
+            X {selectedBoxWithName.x}, Y {selectedBoxWithName.y}, W {selectedBoxWithName.width}, H {selectedBoxWithName.height}
           </span>
-          <span>
-            API: {ocrLayoutApi.baseUrl}
-          </span>
+          <span>API: {ocrLayoutApi.baseUrl}</span>
         </div>
 
         <div ref={stageRef} className="calibration-stage">
@@ -705,7 +815,7 @@ export default function OcrCalibrationApp() {
             <div className="calibration-empty">
               <h2>No screenshot captured yet</h2>
               <p>
-                Click “Capture screen / game window”, select the monitor or game window, then move and resize the boxes.
+                Click “Capture screen / game window”, choose the game/window, then move and resize boxes.
               </p>
             </div>
           )}
@@ -719,7 +829,6 @@ export default function OcrCalibrationApp() {
               }}
             >
               <img
-                ref={imageRef}
                 alt="Captured game screen"
                 src={captureUrl}
                 draggable={false}
@@ -734,7 +843,7 @@ export default function OcrCalibrationApp() {
                   width: screenBox.width,
                   height: screenBox.height,
                   borderColor: boxDefinition.color,
-                  boxShadow: `0 0 0 9999px rgba(0, 0, 0, 0.18), 0 0 0 2px ${boxDefinition.color}`
+                  boxShadow: `0 0 0 9999px rgba(0,0,0,0.18), 0 0 0 2px ${boxDefinition.color}`
                 }}
                 onPointerDown={(event) => handlePointerDown(event, 'move')}
               >
@@ -743,21 +852,28 @@ export default function OcrCalibrationApp() {
                 </span>
 
                 <button
+                  type="button"
                   className="handle handle-nw"
                   onPointerDown={(event) => handlePointerDown(event, 'nw')}
                   aria-label="Resize northwest"
                 />
+
                 <button
+                  type="button"
                   className="handle handle-ne"
                   onPointerDown={(event) => handlePointerDown(event, 'ne')}
                   aria-label="Resize northeast"
                 />
+
                 <button
+                  type="button"
                   className="handle handle-sw"
                   onPointerDown={(event) => handlePointerDown(event, 'sw')}
                   aria-label="Resize southwest"
                 />
+
                 <button
+                  type="button"
                   className="handle handle-se"
                   onPointerDown={(event) => handlePointerDown(event, 'se')}
                   aria-label="Resize southeast"
@@ -779,7 +895,7 @@ const calibrationCss = `
 
   .calibration-shell {
     display: grid;
-    grid-template-columns: 380px minmax(0, 1fr);
+    grid-template-columns: 400px minmax(0, 1fr);
     width: 100vw;
     height: 100vh;
     color: #e2e8f0;
@@ -803,6 +919,49 @@ const calibrationCss = `
     margin: 0 0 14px;
     color: #94a3b8;
     line-height: 1.45;
+  }
+
+  .calibration-status-wrapper {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+  }
+
+  .calibration-status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .calibration-status-card {
+    display: grid;
+    gap: 4px;
+    border: 1px solid #334155;
+    border-radius: 14px;
+    padding: 10px;
+    background: #020617;
+  }
+
+  .calibration-status-card.ok {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+  }
+
+  .calibration-status-card.bad {
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+  }
+
+  .calibration-status-card span {
+    font-weight: 900;
+  }
+
+  .calibration-status-card small {
+    color: #cbd5e1;
+  }
+
+  .calibration-error {
+    color: #fecaca !important;
   }
 
   .calibration-section {
@@ -851,6 +1010,7 @@ const calibrationCss = `
 
   .calibration-button {
     width: 100%;
+    margin-top: 8px;
     border: 1px solid #334155;
     border-radius: 12px;
     padding: 10px 12px;
@@ -930,13 +1090,7 @@ const calibrationCss = `
     min-width: 0;
     min-height: 0;
     padding: 18px;
-    background:
-      linear-gradient(45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
-      linear-gradient(-45deg, rgba(148, 163, 184, 0.12) 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%),
-      linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.12) 75%);
-    background-size: 28px 28px;
-    background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+    background: #020617;
   }
 
   .calibration-empty {
@@ -947,10 +1101,6 @@ const calibrationCss = `
     padding: 30px;
     background: rgba(15, 23, 42, 0.82);
     text-align: center;
-  }
-
-  .calibration-empty h2 {
-    margin-top: 0;
   }
 
   .calibration-empty p {
@@ -1035,7 +1185,7 @@ const calibrationCss = `
     }
 
     .calibration-sidebar {
-      max-height: 50vh;
+      max-height: 52vh;
       border-right: 0;
       border-bottom: 1px solid rgba(148, 163, 184, 0.24);
     }
