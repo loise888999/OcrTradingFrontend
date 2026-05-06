@@ -3,7 +3,9 @@ import { ocrLayoutApi } from '../ocrLayoutApi.js';
 
 const BASE_BOXES = [
   { id: 'city', label: 'City region', path: ['zones', 'city'], color: '#22c55e' },
-  { id: 'coordinate', label: 'Coordinate', path: ['zones', 'coordinate'], color: '#38bdf8' }
+  { id: 'coordinate', label: 'Coordinate', path: ['zones', 'coordinate'], color: '#38bdf8' },
+  { id: 'buyValidationBox', label: 'Buy region', path: ['price', 'buyValidationBox'], color: '#facc15' },
+  { id: 'sellValidationBox', label: 'Sell region', path: ['price', 'sellValidationBox'], color: '#fb923c' }
 ];
 
 function createRows(count) {
@@ -151,6 +153,8 @@ function updateRowBox(layout, rowIndex, field, box) {
 function fieldNameFromSelection(selection) {
   if (selection === 'city') return 'City';
   if (selection === 'coordinate') return 'Coordinate';
+  if (selection === 'buyValidationBox') return 'BuyValidation';
+  if (selection === 'sellValidationBox') return 'SellValidation';
 
   if (selection.startsWith('row-')) {
     const [, row] = selection.split('-');
@@ -339,6 +343,8 @@ export default function OcrCalibrationApp() {
   const [testResult, setTestResult] = useState(null);
   const [rowCount, setRowCount] = useState(4);
   const [rowGap, setRowGap] = useState(45);
+  const [showRowSetup, setShowRowSetup] = useState(false);
+  const [showBoxNumbers, setShowBoxNumbers] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [gameWindow, setGameWindow] = useState(null);
@@ -736,65 +742,51 @@ export default function OcrCalibrationApp() {
         <div className="calibration-section">
           <h2>Coordinate handling</h2>
           <p>
-            No manual offset is needed. Boxes are saved relative to the captured game image.
-            When OCR runs, the backend finds the current selected game window and adds its current Left/Top automatically.
-          </p>
-          <p>
-            This means moving the game window after calibration should still work, as long as the backend can find the selected game window.
+            First select the game window, then capture the game screen. Choose City region,
+            Coordinate, or a row box from Selected box, then drag and resize the highlighted box
+            over the matching text in the screenshot. Use Test selected box OCR to check the
+            result before moving to the next box. When the boxes look right, save the layout.
           </p>
         </div>
 
         <div className="calibration-section">
-          <h2>Mode</h2>
-
-          <label className="calibration-checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(layout.useLayoutForCity)}
-              onChange={(event) =>
-                setLayout((current) => ({ ...current, useLayoutForCity: event.target.checked }))}
-            />
-            Use layout for City
-          </label>
-
-          <label className="calibration-checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(layout.useLayoutForCoordinate)}
-              onChange={(event) =>
-                setLayout((current) => ({ ...current, useLayoutForCoordinate: event.target.checked }))}
-            />
-            Use layout for Coordinate
-          </label>
-
-        </div>
-
-        <div className="calibration-section">
-          <h2>Rows</h2>
-
-          <label>
-            Visible trade-good rows
-            <input
-              type="number"
-              min="1"
-              max="20"
-              value={rowCount}
-              onChange={(event) => setRowCount(Number(event.target.value || 1))}
-            />
-          </label>
-
-          <label>
-            Row gap in pixels
-            <input
-              type="number"
-              value={rowGap}
-              onChange={(event) => setRowGap(Number(event.target.value || 45))}
-            />
-          </label>
-
-          <button className="calibration-button" onClick={applyRowsFromFirstRow}>
-            Copy row 1 setup to all rows
+          <button
+            className="calibration-disclosure-button"
+            type="button"
+            aria-expanded={showRowSetup}
+            onClick={() => setShowRowSetup((value) => !value)}
+          >
+            <span>Advanced row setup</span>
+            <span>{showRowSetup ? 'Hide' : 'Show'}</span>
           </button>
+
+          {showRowSetup && (
+            <div className="calibration-disclosure-body">
+              <label>
+                Visible trade-good rows
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={rowCount}
+                  onChange={(event) => setRowCount(Number(event.target.value || 1))}
+                />
+              </label>
+
+              <label>
+                Row gap in pixels
+                <input
+                  type="number"
+                  value={rowGap}
+                  onChange={(event) => setRowGap(Number(event.target.value || 45))}
+                />
+              </label>
+
+              <button className="calibration-button" onClick={applyRowsFromFirstRow}>
+                Copy row 1 setup to all rows
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="calibration-section">
@@ -816,45 +808,59 @@ export default function OcrCalibrationApp() {
             Reset selected box into view
           </button>
 
-          <label>
-            X
-            <input
-              type="number"
-              value={selectedBoxWithName.x}
-              onChange={(event) => updateSelectedBoxNumber('x', event.target.value)}
-            />
-          </label>
-
-          <label>
-            Y
-            <input
-              type="number"
-              value={selectedBoxWithName.y}
-              onChange={(event) => updateSelectedBoxNumber('y', event.target.value)}
-            />
-          </label>
-
-          <label>
-            Width
-            <input
-              type="number"
-              value={selectedBoxWithName.width}
-              onChange={(event) => updateSelectedBoxNumber('width', event.target.value)}
-            />
-          </label>
-
-          <label>
-            Height
-            <input
-              type="number"
-              value={selectedBoxWithName.height}
-              onChange={(event) => updateSelectedBoxNumber('height', event.target.value)}
-            />
-          </label>
-
           <button className="calibration-button primary" onClick={testSelectedBox}>
             Test selected box OCR
           </button>
+
+          <button
+            className="calibration-disclosure-button"
+            type="button"
+            aria-expanded={showBoxNumbers}
+            onClick={() => setShowBoxNumbers((value) => !value)}
+          >
+            <span>Manual size and position</span>
+            <span>{showBoxNumbers ? 'Hide' : 'Show'}</span>
+          </button>
+
+          {showBoxNumbers && (
+            <div className="calibration-disclosure-body">
+              <label>
+                X
+                <input
+                  type="number"
+                  value={selectedBoxWithName.x}
+                  onChange={(event) => updateSelectedBoxNumber('x', event.target.value)}
+                />
+              </label>
+
+              <label>
+                Y
+                <input
+                  type="number"
+                  value={selectedBoxWithName.y}
+                  onChange={(event) => updateSelectedBoxNumber('y', event.target.value)}
+                />
+              </label>
+
+              <label>
+                Width
+                <input
+                  type="number"
+                  value={selectedBoxWithName.width}
+                  onChange={(event) => updateSelectedBoxNumber('width', event.target.value)}
+                />
+              </label>
+
+              <label>
+                Height
+                <input
+                  type="number"
+                  value={selectedBoxWithName.height}
+                  onChange={(event) => updateSelectedBoxNumber('height', event.target.value)}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {message && <div className="calibration-message">{message}</div>}
@@ -1063,6 +1069,38 @@ const calibrationCss = `
     background: #020617;
     color: #e2e8f0;
     font: inherit;
+  }
+
+  .calibration-disclosure-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #020617;
+    color: #e2e8f0;
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .calibration-disclosure-button:hover {
+    background: #1e293b;
+  }
+
+  .calibration-disclosure-button span:last-child {
+    color: #93c5fd;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+
+  .calibration-disclosure-body {
+    display: grid;
+    gap: 9px;
   }
 
   .calibration-checkbox {
