@@ -2,10 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ocrLayoutApi } from '../ocrLayoutApi.js';
 
 const BASE_BOXES = [
-  { id: 'city', label: 'City', path: ['zones', 'city'], color: '#22c55e' },
-  { id: 'coordinate', label: 'Coordinate', path: ['zones', 'coordinate'], color: '#38bdf8' },
-  { id: 'buyValidationBox', label: 'Buy validation', path: ['price', 'buyValidationBox'], color: '#facc15' },
-  { id: 'sellValidationBox', label: 'Sell validation', path: ['price', 'sellValidationBox'], color: '#fb923c' }
+  { id: 'city', label: 'City region', path: ['zones', 'city'], color: '#22c55e' },
+  { id: 'coordinate', label: 'Coordinate', path: ['zones', 'coordinate'], color: '#38bdf8' }
 ];
 
 function createRows(count) {
@@ -20,9 +18,10 @@ function createRows(count) {
     return {
       index: row,
       enabled: true,
-      itemName: { name: `Row${row}ItemName`, x: 820, y, width: 260, height: 35 },
-      price: { name: `Row${row}Price`, x: 1160, y, width: 100, height: 35 },
-      multiplier: { name: `Row${row}Multiplier`, x: 1270, y, width: 90, height: 35 }
+      row: { name: `Row${row}`, x: 810, y, width: 560, height: 35 },
+      itemName: null,
+      price: null,
+      multiplier: null
     };
   });
 }
@@ -33,7 +32,7 @@ function createDefaultLayout() {
     enabled: true,
     useLayoutForCity: true,
     useLayoutForCoordinate: true,
-    useLayoutForPrice: false,
+    useLayoutForPrice: true,
     screenWidth: null,
     screenHeight: null,
     zones: {
@@ -42,7 +41,7 @@ function createDefaultLayout() {
     },
     price: {
       visibleRows: 4,
-      useFieldBoxes: false,
+      useFieldBoxes: true,
       buyValidationBox: { name: 'BuyValidation', x: 900, y: 300, width: 130, height: 45 },
       sellValidationBox: { name: 'SellValidation', x: 1040, y: 300, width: 130, height: 45 },
       rows: createRows(4)
@@ -70,7 +69,37 @@ function normalizeLayout(layout) {
   };
 
   merged.price.visibleRows = Math.max(1, Math.min(20, Number(merged.price.visibleRows || 4)));
+  merged.useLayoutForPrice = true;
+  merged.price.useFieldBoxes = true;
+  merged.price.rows = merged.price.rows.map((row) => ({
+    ...row,
+    row: row.row || buildWholeRowBoxFromFields(row)
+  }));
   return merged;
+}
+
+function isBoxValid(box) {
+  return box && Number(box.width || 0) > 0 && Number(box.height || 0) > 0;
+}
+
+function buildWholeRowBoxFromFields(row) {
+  const fields = [row?.itemName, row?.price, row?.multiplier].filter(isBoxValid);
+
+  if (fields.length === 0) return null;
+
+  const left = Math.min(...fields.map((box) => Number(box.x || 0)));
+  const top = Math.min(...fields.map((box) => Number(box.y || 0)));
+  const right = Math.max(...fields.map((box) => Number(box.x || 0) + Number(box.width || 0)));
+  const bottom = Math.max(...fields.map((box) => Number(box.y || 0) + Number(box.height || 0)));
+  const index = row?.index ?? row?.Index ?? '';
+
+  return {
+    name: `Row${index}`,
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top)
+  };
 }
 
 function clone(value) {
@@ -105,6 +134,7 @@ function updateRowBox(layout, rowIndex, field, box) {
     row = {
       index: Number(rowIndex),
       enabled: true,
+      row: null,
       itemName: null,
       price: null,
       multiplier: null
@@ -121,13 +151,10 @@ function updateRowBox(layout, rowIndex, field, box) {
 function fieldNameFromSelection(selection) {
   if (selection === 'city') return 'City';
   if (selection === 'coordinate') return 'Coordinate';
-  if (selection === 'buyValidationBox') return 'BuyValidation';
-  if (selection === 'sellValidationBox') return 'SellValidation';
 
   if (selection.startsWith('row-')) {
-    const [, row, field] = selection.split('-');
-    const suffix = field === 'itemName' ? 'ItemName' : field === 'price' ? 'Price' : 'Multiplier';
-    return `Row${row}${suffix}`;
+    const [, row] = selection.split('-');
+    return `Row${row}`;
   }
 
   return selection;
@@ -135,18 +162,17 @@ function fieldNameFromSelection(selection) {
 
 function getBoxDefinition(selection, layout) {
   if (selection.startsWith('row-')) {
-    const [, rowText, field] = selection.split('-');
+    const [, rowText] = selection.split('-');
     const rowIndex = Number(rowText);
     const row = layout.price.rows.find((item) => Number(item.index) === rowIndex);
-    const fieldLabel = field === 'itemName' ? 'Item name' : field === 'price' ? 'Price' : 'Multiplier';
 
     return {
       id: selection,
-      label: `Row ${rowIndex} ${fieldLabel}`,
-      color: field === 'itemName' ? '#a855f7' : field === 'price' ? '#ef4444' : '#14b8a6',
-      box: row?.[field],
+      label: `Row ${rowIndex} whole row`,
+      color: '#f97316',
+      box: row?.row,
       kind: selection,
-      save: (nextLayout, box) => updateRowBox(nextLayout, rowIndex, field, box)
+      save: (nextLayout, box) => updateRowBox(nextLayout, rowIndex, 'row', box)
     };
   }
 
@@ -185,7 +211,7 @@ function copyBoxFromFirstRow(layout, rowCount, rowGap) {
   const copy = clone(layout);
   const first = copy.price.rows.find((row) => Number(row.index) === 1);
 
-  if (!first?.itemName || !first?.price || !first?.multiplier) {
+  if (!first?.row) {
     return copy;
   }
 
@@ -197,21 +223,16 @@ function copyBoxFromFirstRow(layout, rowCount, rowGap) {
     return {
       index: rowIndex,
       enabled: true,
-      itemName: {
-        ...first.itemName,
-        name: `Row${rowIndex}ItemName`,
-        y: Number(first.itemName.y) + yOffset
-      },
-      price: {
-        ...first.price,
-        name: `Row${rowIndex}Price`,
-        y: Number(first.price.y) + yOffset
-      },
-      multiplier: {
-        ...first.multiplier,
-        name: `Row${rowIndex}Multiplier`,
-        y: Number(first.multiplier.y) + yOffset
-      }
+      row: first.row
+        ? {
+            ...first.row,
+            name: `Row${rowIndex}`,
+            y: Number(first.row.y) + yOffset
+          }
+        : null,
+      itemName: null,
+      price: null,
+      multiplier: null
     };
   });
 
@@ -660,26 +681,11 @@ export default function OcrCalibrationApp() {
     setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), Number(rowGap)));
   };
 
-  const togglePriceFieldMode = (checked) => {
-    setLayout((current) => ({
-      ...current,
-      useLayoutForPrice: checked,
-      price: {
-        ...current.price,
-        useFieldBoxes: checked
-      }
-    }));
-  };
-
   const boxList = useMemo(() => {
     const rows = layout.price.rows
       .slice()
       .sort((a, b) => Number(a.index) - Number(b.index))
-      .flatMap((row) => [
-        { id: `row-${row.index}-itemName`, label: `Row ${row.index} item` },
-        { id: `row-${row.index}-price`, label: `Row ${row.index} price` },
-        { id: `row-${row.index}-multiplier`, label: `Row ${row.index} multiplier` }
-      ]);
+      .map((row) => ({ id: `row-${row.index}-row`, label: `Row ${row.index} whole row` }));
 
     return [
       ...BASE_BOXES.map((box) => ({
@@ -761,14 +767,6 @@ export default function OcrCalibrationApp() {
             Use layout for Coordinate
           </label>
 
-          <label className="calibration-checkbox">
-            <input
-              type="checkbox"
-              checked={Boolean(layout.useLayoutForPrice && layout.price.useFieldBoxes)}
-              onChange={(event) => togglePriceFieldMode(event.target.checked)}
-            />
-            Use exact price field boxes
-          </label>
         </div>
 
         <div className="calibration-section">
@@ -795,7 +793,7 @@ export default function OcrCalibrationApp() {
           </label>
 
           <button className="calibration-button" onClick={applyRowsFromFirstRow}>
-            Copy row 1 boxes to all rows
+            Copy row 1 setup to all rows
           </button>
         </div>
 
