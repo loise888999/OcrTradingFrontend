@@ -85,6 +85,7 @@ function Field({ label, children, hint }) {
 
 function StatusBar({
   backendStatus,
+  gameWindowStatus,
   ocrStatus,
   latestCity,
   error,
@@ -94,6 +95,7 @@ function StatusBar({
   refreshStatus
 }) {
   const connected = backendStatus?.status === 'ok';
+  const gameSelected = Boolean(gameWindowStatus);
   const cityName = sanitizeCityName(latestCity?.city) || 'Unknown';
 
   return (
@@ -102,6 +104,11 @@ function StatusBar({
         <Badge tone={connected ? 'success' : 'danger'}>
           {connected ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
           Backend {connected ? 'Connected' : 'Offline'}
+        </Badge>
+
+        <Badge tone={gameSelected ? 'success' : 'danger'}>
+          {gameSelected ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+          Game {gameSelected ? 'Selected' : 'Not Found'}
         </Badge>
 
         <Badge tone="info">City: {cityName}</Badge>
@@ -496,6 +503,7 @@ function SettingsTab({
 export default function App() {
   const [activeTab, setActiveTab] = useState('map');
   const [backendStatus, setBackendStatus] = useState(null);
+  const [gameWindowStatus, setGameWindowStatus] = useState(null);
   const [ocrStatus, setOcrStatus] = useState(null);
   const [latestCity, setLatestCity] = useState(null);
   const [coordinates, setCoordinates] = useState([]);
@@ -527,6 +535,13 @@ export default function App() {
   const refreshStatus = useCallback(async () => {
     const health = await run(() => api.health(), 'Backend unavailable');
     if (health) setBackendStatus(health);
+
+    try {
+      const gameWindow = await api.getGameWindow();
+      setGameWindowStatus(gameWindow || null);
+    } catch {
+      setGameWindowStatus(null);
+    }
 
     const status = await run(() => api.getOcrStatus(), 'Could not load OCR status');
     if (status) setOcrStatus(status);
@@ -632,6 +647,7 @@ export default function App() {
 
       <StatusBar
         backendStatus={backendStatus}
+        gameWindowStatus={gameWindowStatus}
         ocrStatus={ocrStatus}
         latestCity={latestCity}
         error={error}

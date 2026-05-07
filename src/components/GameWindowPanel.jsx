@@ -68,6 +68,21 @@ export default function GameWindowPanel({ run }) {
     }
   };
 
+  const forgetRememberedWindow = async () => {
+    setMessage('Forgetting remembered game window...');
+    const result = await run(
+      () => api.forgetRememberedGameWindow(),
+      'Could not forget remembered game window.'
+    );
+
+    if (result) {
+      setWindowInfo(null);
+      setMouseWindowInfo(null);
+      setChecked(false);
+      setMessage('Remembered game window forgotten. Select it again with the mouse.');
+    }
+  };
+
   const renderWindowInfo = (info, title) => (
     <div className="mini-info success-info">
       <strong><CheckCircle2 size={16} /> {title}</strong>
@@ -106,6 +121,9 @@ export default function GameWindowPanel({ run }) {
         </button>
         <button type="button" className="button button-warning" onClick={clearSelectedWindow} disabled={selecting}>
           <XCircle size={16} /> Clear selected window
+        </button>
+        <button type="button" className="button button-warning" onClick={forgetRememberedWindow} disabled={selecting}>
+          <XCircle size={16} /> Forget remembered app
         </button>
       </div>
 

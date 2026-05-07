@@ -8,14 +8,15 @@ const BASE_BOXES = [
   { id: 'sellValidationBox', label: 'Sell region', path: ['price', 'sellValidationBox'], color: '#fb923c' }
 ];
 
+const DEFAULT_ROW_GAP = 45;
+
 function createRows(count) {
   const safeCount = Math.max(1, Math.min(20, Number(count || 4)));
   const startY = 380;
-  const rowGap = 45;
 
   return Array.from({ length: safeCount }, (_, index) => {
     const row = index + 1;
-    const y = startY + index * rowGap;
+    const y = startY + index * DEFAULT_ROW_GAP;
 
     return {
       index: row,
@@ -474,7 +475,6 @@ export default function OcrCalibrationApp() {
   const [message, setMessage] = useState('');
   const [testResult, setTestResult] = useState(null);
   const [rowCount, setRowCount] = useState(4);
-  const [rowGap, setRowGap] = useState(45);
   const [showRowSetup, setShowRowSetup] = useState(false);
   const [showBoxNumbers, setShowBoxNumbers] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -575,8 +575,11 @@ export default function OcrCalibrationApp() {
     load();
     refreshGameWindow();
 
+    const gameWindowTimer = setInterval(refreshGameWindow, 3000);
+
     return () => {
       cancelled = true;
+      clearInterval(gameWindowTimer);
     };
   }, [refreshGameWindow]);
 
@@ -838,7 +841,7 @@ export default function OcrCalibrationApp() {
   };
 
   const applyRowsFromFirstRow = () => {
-    setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), Number(rowGap)));
+    setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), DEFAULT_ROW_GAP));
   };
 
   const boxList = useMemo(() => {
@@ -872,10 +875,6 @@ export default function OcrCalibrationApp() {
           captureSize={captureSize}
           captureUrl={captureUrl}
         />
-
-        <button className="calibration-button" onClick={refreshGameWindow}>
-          Refresh main app game status
-        </button>
 
         <button className="calibration-button" onClick={selectGameUnderMouse}>
           Redo game selection here, under mouse in 5s
@@ -931,17 +930,8 @@ export default function OcrCalibrationApp() {
                 />
               </label>
 
-              <label>
-                Row gap in pixels
-                <input
-                  type="number"
-                  value={rowGap}
-                  onChange={(event) => setRowGap(Number(event.target.value || 45))}
-                />
-              </label>
-
               <button className="calibration-button" onClick={applyRowsFromFirstRow}>
-                Copy row 1 setup to all rows
+                Apply default row template
               </button>
             </div>
           )}
@@ -1018,14 +1008,6 @@ export default function OcrCalibrationApp() {
                 />
               </label>
             </div>
-          )}
-
-          {selection === 'coordinate' && (
-            <CoordinateZoomLens
-              captureUrl={captureUrl}
-              captureSize={captureSize}
-              box={selectedBoxWithName}
-            />
           )}
         </div>
 
@@ -1146,6 +1128,14 @@ export default function OcrCalibrationApp() {
               </div>
             </div>
           )}
+
+          {selection === 'coordinate' && (
+            <CoordinateZoomLens
+              captureUrl={captureUrl}
+              captureSize={captureSize}
+              box={selectedBoxWithName}
+            />
+          )}
         </div>
       </main>
     </div>
@@ -1160,7 +1150,7 @@ const calibrationCss = `
 
   .calibration-shell {
     display: grid;
-    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 420px;
     width: 100vw;
     height: 100vh;
     color: #e2e8f0;
@@ -1169,8 +1159,9 @@ const calibrationCss = `
   }
 
   .calibration-sidebar {
+    order: 2;
     overflow: auto;
-    border-right: 1px solid rgba(148, 163, 184, 0.24);
+    border-left: 1px solid rgba(148, 163, 184, 0.24);
     padding: 18px;
     background: #0f172a;
   }
@@ -1395,9 +1386,18 @@ const calibrationCss = `
   }
 
   .coordinate-zoom-panel {
+    position: absolute;
+    right: 28px;
+    top: 72px;
+    z-index: 6;
     display: grid;
     gap: 8px;
-    margin-top: 10px;
+    width: min(340px, calc(100% - 56px));
+    border: 1px solid rgba(56, 189, 248, 0.42);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(2, 6, 23, 0.88);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   }
 
   .coordinate-zoom-lens {
@@ -1562,6 +1562,7 @@ const calibrationCss = `
   }
 
   .calibration-main {
+    order: 1;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-width: 0;
@@ -1685,9 +1686,20 @@ const calibrationCss = `
     }
 
     .calibration-sidebar {
+      order: 1;
       max-height: 52vh;
-      border-right: 0;
+      border-left: 0;
       border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+    }
+
+    .calibration-main {
+      order: 2;
+    }
+
+    .coordinate-zoom-panel {
+      position: static;
+      width: min(340px, 100%);
+      margin-top: 12px;
     }
   }
 `;
