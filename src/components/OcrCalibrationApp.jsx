@@ -1114,11 +1114,11 @@ export default function OcrCalibrationApp() {
             <pre>{testResult.rawText || '(empty)'}</pre>
             {testResult.debugImagePath && <small>{testResult.debugImagePath}</small>}
             <div className="calibration-debug-preview-grid">
-              {testResult.debugImageUrl && (
+              {(testResult.imageDataUrl || testResult.debugImageUrl) && (
                 <div className="calibration-debug-preview">
                   <span>Backend OCR image</span>
                   <img
-                    src={buildApiAssetUrl(testResult.debugImageUrl)}
+                    src={testResult.imageDataUrl || buildApiAssetUrl(testResult.debugImageUrl)}
                     alt="Preprocessed OCR crop used by backend"
                   />
                 </div>
