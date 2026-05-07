@@ -26,6 +26,7 @@ const DEFAULT_WAYPOINT_OFFSET_X = 0;
 const DEFAULT_WAYPOINT_OFFSET_Y = 0;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
+const DEFAULT_MAP_SLOPE_POINT_COUNT = 8;
 const MAP_IMAGE_URL = '/maps/world-map.png';
 
 function sanitizeCityName(value) {
@@ -41,6 +42,12 @@ function normalizeX(value, width) {
 
 function clampY(value, height) {
   return Math.max(0, Math.min(height, Number(value || 0)));
+}
+
+function clampMapSlopePointCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
+  return Math.max(3, Math.min(25, Math.round(parsed)));
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -460,6 +467,22 @@ function SettingsTab({
                 }
               />
             </Field>
+
+            <Field
+              label="Direction slope points"
+              hint="More points = smoother direction but slower to react. Fewer points = faster reaction but more jitter."
+            >
+              <input
+                className="input"
+                type="number"
+                min="3"
+                max="25"
+                value={settings.mapSlopePointCount}
+                onChange={(event) =>
+                  saveMapSetting('mapSlopePointCount', clampMapSlopePointCount(event.target.value))
+                }
+              />
+            </Field>
           </div>
         </Card>
 
@@ -519,7 +542,8 @@ export default function App() {
     waypointOffsetX: DEFAULT_WAYPOINT_OFFSET_X,
     waypointOffsetY: DEFAULT_WAYPOINT_OFFSET_Y,
     ocrInterval: DEFAULT_OCR_INTERVAL,
-    cityInterval: DEFAULT_CITY_INTERVAL
+    cityInterval: DEFAULT_CITY_INTERVAL,
+    mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT
   });
 
   const run = useCallback(async (fn, fallbackMessage = 'Request failed') => {
@@ -580,7 +604,10 @@ export default function App() {
         waypointOffsetX: Number(data.settings.waypointOffsetX ?? current.waypointOffsetX),
         waypointOffsetY: Number(data.settings.waypointOffsetY ?? current.waypointOffsetY),
         ocrInterval: Number(data.settings.ocrInterval ?? current.ocrInterval),
-        cityInterval: Number(data.settings.cityInterval ?? current.cityInterval)
+        cityInterval: Number(data.settings.cityInterval ?? current.cityInterval),
+        mapSlopePointCount: clampMapSlopePointCount(
+          data.settings.mapSlopePointCount ?? current.mapSlopePointCount
+        )
       }));
     }
   }, [run]);
@@ -700,6 +727,7 @@ export default function App() {
             xZeroOffset={settings.xZeroOffset}
             waypointOffsetX={settings.waypointOffsetX}
             waypointOffsetY={settings.waypointOffsetY}
+            mapSlopePointCount={settings.mapSlopePointCount}
             refreshCoordinates={refreshCoordinates}
           />
         )}

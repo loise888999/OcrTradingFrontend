@@ -10,6 +10,7 @@ const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const MAX_SESSION_TRAIL_POINTS = 10000;
 const MAX_SLOPE_WORLD_LENGTH_RATIO = 0.75;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
+const DEFAULT_MAP_SLOPE_POINT_COUNT = 8;
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -30,6 +31,12 @@ function normalizePanX(panX, worldWidth, zoom) {
 
 function clampY(value, height) {
   return Math.max(0, Math.min(height, Number(value || 0)));
+}
+
+function clampMapSlopePointCount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
+  return Math.max(3, Math.min(25, Math.round(parsed)));
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -539,6 +546,7 @@ export default function WrappedCoordinateMap({
   xZeroOffset,
   waypointOffsetX,
   waypointOffsetY,
+  mapSlopePointCount = DEFAULT_MAP_SLOPE_POINT_COUNT,
   refreshCoordinates
 }) {
   const [zoom, setZoom] = useState(0.075);
@@ -704,9 +712,11 @@ export default function WrappedCoordinateMap({
     [displayTrailCoordinates, worldWidth]
   );
 
+  const slopePointCount = clampMapSlopePointCount(mapSlopePointCount);
+
   const rawSlopeLine = useMemo(
-    () => buildSlopeLine(coordinates, worldWidth, worldHeight, 12),
-    [coordinates, worldWidth, worldHeight]
+    () => buildSlopeLine(coordinates, worldWidth, worldHeight, slopePointCount),
+    [coordinates, worldWidth, worldHeight, slopePointCount]
   );
 
   const slopeLine = useMemo(
