@@ -239,19 +239,103 @@ function GuidePreview() {
 function CoordinateZoomLens({
   captureUrl,
   captureSize,
-  box
+  box,
+  boxColor,
+  label,
+  onBoxChange
 }) {
-  if (!captureUrl || !captureSize.width || !captureSize.height || !box) {
-    return null;
-  }
+  const [zoomDrag, setZoomDrag] = useState(null);
+  const hasImage = Boolean(captureUrl && captureSize.width && captureSize.height && box);
 
   const lensWidth = 320;
   const lensHeight = 180;
-  const zoom = 3;
-  const centerX = Math.max(0, Math.min(captureSize.width, Number(box.x || 0) + Number(box.width || 0) / 2));
-  const centerY = Math.max(0, Math.min(captureSize.height, Number(box.y || 0) + Number(box.height || 0) / 2));
-  const boxWidth = Math.max(1, Number(box.width || 0) * zoom);
-  const boxHeight = Math.max(1, Number(box.height || 0) * zoom);
+  const lensPadding = 28;
+  const rawBoxWidth = hasImage ? Math.max(1, Number(box.width || 0)) : 1;
+  const rawBoxHeight = hasImage ? Math.max(1, Number(box.height || 0)) : 1;
+  const fitZoom = Math.min(
+    3,
+    (lensWidth - lensPadding * 2) / rawBoxWidth,
+    (lensHeight - lensPadding * 2) / rawBoxHeight
+  );
+  const zoom = Math.max(0.2, fitZoom);
+  const centerX = hasImage ? Math.max(0, Math.min(captureSize.width, Number(box.x || 0) + Number(box.width || 0) / 2)) : 0;
+  const centerY = hasImage ? Math.max(0, Math.min(captureSize.height, Number(box.y || 0) + Number(box.height || 0) / 2)) : 0;
+  const boxWidth = hasImage ? Math.max(1, rawBoxWidth * zoom) : 1;
+  const boxHeight = hasImage ? Math.max(1, rawBoxHeight * zoom) : 1;
+  const lensBox = {
+    left: (lensWidth - boxWidth) / 2,
+    top: (lensHeight - boxHeight) / 2,
+    width: boxWidth,
+    height: boxHeight
+  };
+  const handleBase = {
+    '--zoom-handle-left': `${lensBox.left}px`,
+    '--zoom-handle-top': `${lensBox.top}px`,
+    '--zoom-handle-right': `${lensBox.left + lensBox.width}px`,
+    '--zoom-handle-bottom': `${lensBox.top + lensBox.height}px`
+  };
+
+  const handlePointerDown = (event, mode) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setZoomDrag({
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      original: { ...box }
+    });
+  };
+
+  useEffect(() => {
+    if (!zoomDrag) return;
+
+    const onMove = (event) => {
+      const dx = (event.clientX - zoomDrag.startX) / zoom;
+      const dy = (event.clientY - zoomDrag.startY) / zoom;
+      const original = zoomDrag.original;
+      let next = { ...original };
+
+      if (zoomDrag.mode === 'move') {
+        next.x = Math.round(Number(original.x || 0) + dx);
+        next.y = Math.round(Number(original.y || 0) + dy);
+      } else {
+        if (zoomDrag.mode.includes('e')) {
+          next.width = Math.max(1, Math.round(Number(original.width || 1) + dx));
+        }
+
+        if (zoomDrag.mode.includes('s')) {
+          next.height = Math.max(1, Math.round(Number(original.height || 1) + dy));
+        }
+
+        if (zoomDrag.mode.includes('w')) {
+          next.x = Math.round(Number(original.x || 0) + dx);
+          next.width = Math.max(1, Math.round(Number(original.width || 1) - dx));
+        }
+
+        if (zoomDrag.mode.includes('n')) {
+          next.y = Math.round(Number(original.y || 0) + dy);
+          next.height = Math.max(1, Math.round(Number(original.height || 1) - dy));
+        }
+      }
+
+      onBoxChange?.(next);
+    };
+
+    const onUp = () => setZoomDrag(null);
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [zoomDrag, onBoxChange, zoom]);
+
+  if (!hasImage) {
+    return null;
+  }
 
   return (
     <div className="coordinate-zoom-panel">
@@ -268,13 +352,21 @@ function CoordinateZoomLens({
         <div
           className="coordinate-zoom-box"
           style={{
-            width: boxWidth,
-            height: boxHeight
+            left: lensBox.left,
+            top: lensBox.top,
+            width: lensBox.width,
+            height: lensBox.height,
+            borderColor: boxColor || '#38bdf8'
           }}
+          onPointerDown={(event) => handlePointerDown(event, 'move')}
         />
+        <button type="button" className="zoom-handle zoom-handle-nw" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'nw')} aria-label="Resize zoom northwest" />
+        <button type="button" className="zoom-handle zoom-handle-ne" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'ne')} aria-label="Resize zoom northeast" />
+        <button type="button" className="zoom-handle zoom-handle-sw" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'sw')} aria-label="Resize zoom southwest" />
+        <button type="button" className="zoom-handle zoom-handle-se" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'se')} aria-label="Resize zoom southeast" />
       </div>
       <div className="coordinate-zoom-meta">
-        <strong>Coordinate zoom</strong>
+        <strong>{label || 'OCR crop'} zoom</strong>
         <span>
           X {box.x}, Y {box.y}, W {box.width}, H {box.height}
         </span>
@@ -888,10 +980,6 @@ export default function OcrCalibrationApp() {
           {isSaving ? 'Saving...' : 'Save layout'}
         </button>
 
-        <button className="calibration-button primary" onClick={runCalibrationScore} disabled={isScoring}>
-          {isScoring ? 'Scoring...' : 'Save + score calibration'}
-        </button>
-
         <button className="calibration-button" onClick={() => { window.location.href = '/'; }}>
           Back to main app
         </button>
@@ -1016,6 +1104,12 @@ export default function OcrCalibrationApp() {
         {testResult && (
           <div className="calibration-result">
             <strong>OCR result</strong>
+            {testResult.status && (
+              <small>
+                Score: {Math.round(Number(testResult.score || 0) * 100)}% · {testResult.status} · {testResult.message}
+              </small>
+            )}
+            {testResult.parsedText && <small>Parsed: {testResult.parsedText}</small>}
             {testResult.source && <small>Image source: {testResult.source}</small>}
             <pre>{testResult.rawText || '(empty)'}</pre>
             {testResult.debugImagePath && <small>{testResult.debugImagePath}</small>}
@@ -1129,13 +1223,18 @@ export default function OcrCalibrationApp() {
             </div>
           )}
 
-          {selection === 'coordinate' && (
-            <CoordinateZoomLens
-              captureUrl={captureUrl}
-              captureSize={captureSize}
-              box={selectedBoxWithName}
-            />
-          )}
+          <CoordinateZoomLens
+            captureUrl={captureUrl}
+            captureSize={captureSize}
+            box={selectedBoxWithName}
+            boxColor={boxDefinition.color}
+            label={boxDefinition.label}
+            onBoxChange={(nextBox) => saveSelectedBox({
+              ...selectedBoxWithName,
+              ...nextBox,
+              name: selectedBoxWithName.name || fieldNameFromSelection(selection)
+            })}
+          />
         </div>
       </main>
     </div>
@@ -1413,14 +1512,47 @@ const calibrationCss = `
 
   .coordinate-zoom-box {
     position: absolute;
-    left: 50%;
-    top: 50%;
     max-width: calc(100% - 16px);
     max-height: calc(100% - 16px);
     border: 2px solid #38bdf8;
-    transform: translate(-50%, -50%);
     box-shadow: 0 0 0 999px rgba(2, 6, 23, 0.28);
-    pointer-events: none;
+    cursor: move;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .zoom-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #020617;
+    border-radius: 999px;
+    background: #ffffff;
+    touch-action: none;
+  }
+
+  .zoom-handle-nw {
+    left: calc(var(--zoom-handle-left) - 6px);
+    top: calc(var(--zoom-handle-top) - 6px);
+    cursor: nwse-resize;
+  }
+
+  .zoom-handle-ne {
+    left: calc(var(--zoom-handle-right) - 6px);
+    top: calc(var(--zoom-handle-top) - 6px);
+    cursor: nesw-resize;
+  }
+
+  .zoom-handle-sw {
+    left: calc(var(--zoom-handle-left) - 6px);
+    top: calc(var(--zoom-handle-bottom) - 6px);
+    cursor: nesw-resize;
+  }
+
+  .zoom-handle-se {
+    left: calc(var(--zoom-handle-right) - 6px);
+    top: calc(var(--zoom-handle-bottom) - 6px);
+    cursor: nwse-resize;
   }
 
   .coordinate-zoom-meta {
