@@ -67,5 +67,10 @@ export const ocrLayoutApi = {
         preprocess,
         box
       })
+    }),
+
+  scoreCalibration: () =>
+    request('/api/ocr-layout/calibration-score', {
+      method: 'POST'
     })
 };

@@ -296,6 +296,67 @@ function sameOffset(a, b) {
     Number(a?.y || 0) === Number(b?.y || 0);
 }
 
+function mapScoreKeyToSelection(key) {
+  if (key === 'trade-menu') return 'buyValidationBox';
+  if (key === 'buy-validation') return 'buyValidationBox';
+  if (key === 'sell-validation') return 'sellValidationBox';
+  return key || 'city';
+}
+
+function getScoreStatusLabel(status) {
+  if (status === 'pass') return 'Pass';
+  if (status === 'warn') return 'Check';
+  if (status === 'fail') return 'Fail';
+  return 'Skip';
+}
+
+function CalibrationScorePanel({ result, onSelectCheck }) {
+  const checks = Array.isArray(result?.checks) ? result.checks : [];
+  const recommendations = Array.isArray(result?.recommendations) ? result.recommendations : [];
+  const scorePercent = Math.round(Number(result?.score || 0) * 100);
+  const shownChecks = checks
+    .filter((check) => check.status !== 'skipped')
+    .sort((a, b) => Number(a.score || 0) - Number(b.score || 0));
+
+  return (
+    <div className="calibration-score-panel">
+      <div className="calibration-score-header">
+        <div>
+          <strong>{scorePercent}%</strong>
+          <span>Calibration score</span>
+        </div>
+        <small>
+          {result.passedChecks || 0} pass · {result.warningChecks || 0} check · {result.failedChecks || 0} fail
+        </small>
+      </div>
+
+      {recommendations.length > 0 && (
+        <div className="calibration-score-recommendations">
+          {recommendations.map((item) => (
+            <p key={item}>{item}</p>
+          ))}
+        </div>
+      )}
+
+      <div className="calibration-score-list">
+        {shownChecks.map((check) => (
+          <button
+            key={check.key}
+            type="button"
+            className={`calibration-score-check ${check.status}`}
+            onClick={() => onSelectCheck(check.key)}
+          >
+            <span>{getScoreStatusLabel(check.status)}</span>
+            <strong>{check.label}</strong>
+            <small>{check.message}</small>
+            {check.rawText && <code>{check.rawText}</code>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function GameWindowStatus({ gameWindow, gameWindowError, captureSize, captureUrl }) {
   const hasGameWindow = Boolean(gameWindow);
   const hasOverlayCapture = Boolean(captureUrl);
@@ -346,6 +407,8 @@ export default function OcrCalibrationApp() {
   const [showRowSetup, setShowRowSetup] = useState(false);
   const [showBoxNumbers, setShowBoxNumbers] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isScoring, setIsScoring] = useState(false);
+  const [calibrationScore, setCalibrationScore] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [gameWindow, setGameWindow] = useState(null);
   const [gameWindowError, setGameWindowError] = useState('');
@@ -683,6 +746,26 @@ export default function OcrCalibrationApp() {
     }
   };
 
+  const runCalibrationScore = async () => {
+    try {
+      setIsScoring(true);
+      setCalibrationScore(null);
+      setMessage('Saving layout and scoring OCR boxes...');
+
+      const saved = await ocrLayoutApi.saveLayout(layout);
+      const normalized = normalizeLayout(saved);
+      setLayout(normalized);
+
+      const result = await ocrLayoutApi.scoreCalibration();
+      setCalibrationScore(result);
+      setMessage(`Calibration score: ${Math.round(Number(result.score || 0) * 100)}%.`);
+    } catch (err) {
+      setMessage(`Calibration score failed: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsScoring(false);
+    }
+  };
+
   const applyRowsFromFirstRow = () => {
     setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), Number(rowGap)));
   };
@@ -733,6 +816,10 @@ export default function OcrCalibrationApp() {
 
         <button className="calibration-button" onClick={saveLayout} disabled={isSaving}>
           {isSaving ? 'Saving...' : 'Save layout'}
+        </button>
+
+        <button className="calibration-button primary" onClick={runCalibrationScore} disabled={isScoring}>
+          {isScoring ? 'Scoring...' : 'Save + score calibration'}
         </button>
 
         <button className="calibration-button" onClick={() => { window.location.href = '/'; }}>
@@ -871,6 +958,16 @@ export default function OcrCalibrationApp() {
             <pre>{testResult.rawText || '(empty)'}</pre>
             {testResult.debugImagePath && <small>{testResult.debugImagePath}</small>}
           </div>
+        )}
+
+        {calibrationScore && (
+          <CalibrationScorePanel
+            result={calibrationScore}
+            onSelectCheck={(key) => {
+              setSelection(mapScoreKeyToSelection(key));
+              setMessage(`Selected ${key}. Adjust the highlighted crop, then score again.`);
+            }}
+          />
         )}
       </aside>
 
@@ -1164,6 +1261,132 @@ const calibrationCss = `
 
   .calibration-result small {
     color: #86efac;
+  }
+
+  .calibration-score-panel {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    border-radius: 14px;
+    padding: 12px;
+    background: #020617;
+  }
+
+  .calibration-score-header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .calibration-score-header div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .calibration-score-header strong {
+    color: #ffffff;
+    font-size: 30px;
+    line-height: 1;
+  }
+
+  .calibration-score-header span,
+  .calibration-score-header small {
+    color: #cbd5e1;
+    font-weight: 800;
+  }
+
+  .calibration-score-recommendations {
+    display: grid;
+    gap: 7px;
+  }
+
+  .calibration-score-recommendations p {
+    margin: 0;
+    border-left: 3px solid #f59e0b;
+    padding-left: 8px;
+    color: #fde68a;
+    font-size: 13px;
+  }
+
+  .calibration-score-list {
+    display: grid;
+    gap: 8px;
+    max-height: 360px;
+    overflow: auto;
+  }
+
+  .calibration-score-check {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    width: 100%;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 9px;
+    background: #0f172a;
+    color: #e2e8f0;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .calibration-score-check:hover {
+    background: #1e293b;
+  }
+
+  .calibration-score-check.pass {
+    border-color: rgba(34, 197, 94, 0.6);
+  }
+
+  .calibration-score-check.warn {
+    border-color: rgba(245, 158, 11, 0.7);
+  }
+
+  .calibration-score-check.fail {
+    border-color: rgba(239, 68, 68, 0.75);
+  }
+
+  .calibration-score-check > span {
+    grid-row: span 3;
+    align-self: start;
+    border-radius: 8px;
+    padding: 4px 6px;
+    background: #334155;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 950;
+    text-transform: uppercase;
+  }
+
+  .calibration-score-check.pass > span {
+    background: #15803d;
+  }
+
+  .calibration-score-check.warn > span {
+    background: #b45309;
+  }
+
+  .calibration-score-check.fail > span {
+    background: #b91c1c;
+  }
+
+  .calibration-score-check strong {
+    font-size: 13px;
+  }
+
+  .calibration-score-check small {
+    color: #cbd5e1;
+    line-height: 1.35;
+  }
+
+  .calibration-score-check code {
+    overflow: hidden;
+    color: #93c5fd;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .calibration-main {
