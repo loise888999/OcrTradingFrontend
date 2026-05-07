@@ -8,14 +8,15 @@ const BASE_BOXES = [
   { id: 'sellValidationBox', label: 'Sell region', path: ['price', 'sellValidationBox'], color: '#fb923c' }
 ];
 
+const DEFAULT_ROW_GAP = 45;
+
 function createRows(count) {
   const safeCount = Math.max(1, Math.min(20, Number(count || 4)));
   const startY = 380;
-  const rowGap = 45;
 
   return Array.from({ length: safeCount }, (_, index) => {
     const row = index + 1;
-    const y = startY + index * rowGap;
+    const y = startY + index * DEFAULT_ROW_GAP;
 
     return {
       index: row,
@@ -238,19 +239,103 @@ function GuidePreview() {
 function CoordinateZoomLens({
   captureUrl,
   captureSize,
-  box
+  box,
+  boxColor,
+  label,
+  onBoxChange
 }) {
-  if (!captureUrl || !captureSize.width || !captureSize.height || !box) {
-    return null;
-  }
+  const [zoomDrag, setZoomDrag] = useState(null);
+  const hasImage = Boolean(captureUrl && captureSize.width && captureSize.height && box);
 
   const lensWidth = 320;
   const lensHeight = 180;
-  const zoom = 3;
-  const centerX = Math.max(0, Math.min(captureSize.width, Number(box.x || 0) + Number(box.width || 0) / 2));
-  const centerY = Math.max(0, Math.min(captureSize.height, Number(box.y || 0) + Number(box.height || 0) / 2));
-  const boxWidth = Math.max(1, Number(box.width || 0) * zoom);
-  const boxHeight = Math.max(1, Number(box.height || 0) * zoom);
+  const lensPadding = 28;
+  const rawBoxWidth = hasImage ? Math.max(1, Number(box.width || 0)) : 1;
+  const rawBoxHeight = hasImage ? Math.max(1, Number(box.height || 0)) : 1;
+  const fitZoom = Math.min(
+    3,
+    (lensWidth - lensPadding * 2) / rawBoxWidth,
+    (lensHeight - lensPadding * 2) / rawBoxHeight
+  );
+  const zoom = Math.max(0.2, fitZoom);
+  const centerX = hasImage ? Math.max(0, Math.min(captureSize.width, Number(box.x || 0) + Number(box.width || 0) / 2)) : 0;
+  const centerY = hasImage ? Math.max(0, Math.min(captureSize.height, Number(box.y || 0) + Number(box.height || 0) / 2)) : 0;
+  const boxWidth = hasImage ? Math.max(1, rawBoxWidth * zoom) : 1;
+  const boxHeight = hasImage ? Math.max(1, rawBoxHeight * zoom) : 1;
+  const lensBox = {
+    left: (lensWidth - boxWidth) / 2,
+    top: (lensHeight - boxHeight) / 2,
+    width: boxWidth,
+    height: boxHeight
+  };
+  const handleBase = {
+    '--zoom-handle-left': `${lensBox.left}px`,
+    '--zoom-handle-top': `${lensBox.top}px`,
+    '--zoom-handle-right': `${lensBox.left + lensBox.width}px`,
+    '--zoom-handle-bottom': `${lensBox.top + lensBox.height}px`
+  };
+
+  const handlePointerDown = (event, mode) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setZoomDrag({
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      original: { ...box }
+    });
+  };
+
+  useEffect(() => {
+    if (!zoomDrag) return;
+
+    const onMove = (event) => {
+      const dx = (event.clientX - zoomDrag.startX) / zoom;
+      const dy = (event.clientY - zoomDrag.startY) / zoom;
+      const original = zoomDrag.original;
+      let next = { ...original };
+
+      if (zoomDrag.mode === 'move') {
+        next.x = Math.round(Number(original.x || 0) + dx);
+        next.y = Math.round(Number(original.y || 0) + dy);
+      } else {
+        if (zoomDrag.mode.includes('e')) {
+          next.width = Math.max(1, Math.round(Number(original.width || 1) + dx));
+        }
+
+        if (zoomDrag.mode.includes('s')) {
+          next.height = Math.max(1, Math.round(Number(original.height || 1) + dy));
+        }
+
+        if (zoomDrag.mode.includes('w')) {
+          next.x = Math.round(Number(original.x || 0) + dx);
+          next.width = Math.max(1, Math.round(Number(original.width || 1) - dx));
+        }
+
+        if (zoomDrag.mode.includes('n')) {
+          next.y = Math.round(Number(original.y || 0) + dy);
+          next.height = Math.max(1, Math.round(Number(original.height || 1) - dy));
+        }
+      }
+
+      onBoxChange?.(next);
+    };
+
+    const onUp = () => setZoomDrag(null);
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [zoomDrag, onBoxChange, zoom]);
+
+  if (!hasImage) {
+    return null;
+  }
 
   return (
     <div className="coordinate-zoom-panel">
@@ -267,13 +352,21 @@ function CoordinateZoomLens({
         <div
           className="coordinate-zoom-box"
           style={{
-            width: boxWidth,
-            height: boxHeight
+            left: lensBox.left,
+            top: lensBox.top,
+            width: lensBox.width,
+            height: lensBox.height,
+            borderColor: boxColor || '#38bdf8'
           }}
+          onPointerDown={(event) => handlePointerDown(event, 'move')}
         />
+        <button type="button" className="zoom-handle zoom-handle-nw" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'nw')} aria-label="Resize zoom northwest" />
+        <button type="button" className="zoom-handle zoom-handle-ne" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'ne')} aria-label="Resize zoom northeast" />
+        <button type="button" className="zoom-handle zoom-handle-sw" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'sw')} aria-label="Resize zoom southwest" />
+        <button type="button" className="zoom-handle zoom-handle-se" style={handleBase} onPointerDown={(event) => handlePointerDown(event, 'se')} aria-label="Resize zoom southeast" />
       </div>
       <div className="coordinate-zoom-meta">
-        <strong>Coordinate zoom</strong>
+        <strong>{label || 'OCR crop'} zoom</strong>
         <span>
           X {box.x}, Y {box.y}, W {box.width}, H {box.height}
         </span>
@@ -474,7 +567,6 @@ export default function OcrCalibrationApp() {
   const [message, setMessage] = useState('');
   const [testResult, setTestResult] = useState(null);
   const [rowCount, setRowCount] = useState(4);
-  const [rowGap, setRowGap] = useState(45);
   const [showRowSetup, setShowRowSetup] = useState(false);
   const [showBoxNumbers, setShowBoxNumbers] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -575,8 +667,11 @@ export default function OcrCalibrationApp() {
     load();
     refreshGameWindow();
 
+    const gameWindowTimer = setInterval(refreshGameWindow, 3000);
+
     return () => {
       cancelled = true;
+      clearInterval(gameWindowTimer);
     };
   }, [refreshGameWindow]);
 
@@ -838,7 +933,7 @@ export default function OcrCalibrationApp() {
   };
 
   const applyRowsFromFirstRow = () => {
-    setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), Number(rowGap)));
+    setLayout((current) => copyBoxFromFirstRow(current, Number(rowCount), DEFAULT_ROW_GAP));
   };
 
   const boxList = useMemo(() => {
@@ -873,10 +968,6 @@ export default function OcrCalibrationApp() {
           captureUrl={captureUrl}
         />
 
-        <button className="calibration-button" onClick={refreshGameWindow}>
-          Refresh main app game status
-        </button>
-
         <button className="calibration-button" onClick={selectGameUnderMouse}>
           Redo game selection here, under mouse in 5s
         </button>
@@ -887,10 +978,6 @@ export default function OcrCalibrationApp() {
 
         <button className="calibration-button" onClick={saveLayout} disabled={isSaving}>
           {isSaving ? 'Saving...' : 'Save layout'}
-        </button>
-
-        <button className="calibration-button primary" onClick={runCalibrationScore} disabled={isScoring}>
-          {isScoring ? 'Scoring...' : 'Save + score calibration'}
         </button>
 
         <button className="calibration-button" onClick={() => { window.location.href = '/'; }}>
@@ -931,17 +1018,8 @@ export default function OcrCalibrationApp() {
                 />
               </label>
 
-              <label>
-                Row gap in pixels
-                <input
-                  type="number"
-                  value={rowGap}
-                  onChange={(event) => setRowGap(Number(event.target.value || 45))}
-                />
-              </label>
-
               <button className="calibration-button" onClick={applyRowsFromFirstRow}>
-                Copy row 1 setup to all rows
+                Apply default row template
               </button>
             </div>
           )}
@@ -1019,14 +1097,6 @@ export default function OcrCalibrationApp() {
               </label>
             </div>
           )}
-
-          {selection === 'coordinate' && (
-            <CoordinateZoomLens
-              captureUrl={captureUrl}
-              captureSize={captureSize}
-              box={selectedBoxWithName}
-            />
-          )}
         </div>
 
         {message && <div className="calibration-message">{message}</div>}
@@ -1034,15 +1104,21 @@ export default function OcrCalibrationApp() {
         {testResult && (
           <div className="calibration-result">
             <strong>OCR result</strong>
+            {testResult.status && (
+              <small>
+                Score: {Math.round(Number(testResult.score || 0) * 100)}% · {testResult.status} · {testResult.message}
+              </small>
+            )}
+            {testResult.parsedText && <small>Parsed: {testResult.parsedText}</small>}
             {testResult.source && <small>Image source: {testResult.source}</small>}
             <pre>{testResult.rawText || '(empty)'}</pre>
             {testResult.debugImagePath && <small>{testResult.debugImagePath}</small>}
             <div className="calibration-debug-preview-grid">
-              {testResult.debugImageUrl && (
+              {(testResult.imageDataUrl || testResult.debugImageUrl) && (
                 <div className="calibration-debug-preview">
                   <span>Backend OCR image</span>
                   <img
-                    src={buildApiAssetUrl(testResult.debugImageUrl)}
+                    src={testResult.imageDataUrl || buildApiAssetUrl(testResult.debugImageUrl)}
                     alt="Preprocessed OCR crop used by backend"
                   />
                 </div>
@@ -1146,6 +1222,19 @@ export default function OcrCalibrationApp() {
               </div>
             </div>
           )}
+
+          <CoordinateZoomLens
+            captureUrl={captureUrl}
+            captureSize={captureSize}
+            box={selectedBoxWithName}
+            boxColor={boxDefinition.color}
+            label={boxDefinition.label}
+            onBoxChange={(nextBox) => saveSelectedBox({
+              ...selectedBoxWithName,
+              ...nextBox,
+              name: selectedBoxWithName.name || fieldNameFromSelection(selection)
+            })}
+          />
         </div>
       </main>
     </div>
@@ -1160,7 +1249,7 @@ const calibrationCss = `
 
   .calibration-shell {
     display: grid;
-    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 420px;
     width: 100vw;
     height: 100vh;
     color: #e2e8f0;
@@ -1169,8 +1258,9 @@ const calibrationCss = `
   }
 
   .calibration-sidebar {
+    order: 2;
     overflow: auto;
-    border-right: 1px solid rgba(148, 163, 184, 0.24);
+    border-left: 1px solid rgba(148, 163, 184, 0.24);
     padding: 18px;
     background: #0f172a;
   }
@@ -1395,9 +1485,18 @@ const calibrationCss = `
   }
 
   .coordinate-zoom-panel {
+    position: absolute;
+    right: 28px;
+    top: 72px;
+    z-index: 6;
     display: grid;
     gap: 8px;
-    margin-top: 10px;
+    width: min(340px, calc(100% - 56px));
+    border: 1px solid rgba(56, 189, 248, 0.42);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(2, 6, 23, 0.88);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   }
 
   .coordinate-zoom-lens {
@@ -1413,14 +1512,47 @@ const calibrationCss = `
 
   .coordinate-zoom-box {
     position: absolute;
-    left: 50%;
-    top: 50%;
     max-width: calc(100% - 16px);
     max-height: calc(100% - 16px);
     border: 2px solid #38bdf8;
-    transform: translate(-50%, -50%);
     box-shadow: 0 0 0 999px rgba(2, 6, 23, 0.28);
-    pointer-events: none;
+    cursor: move;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .zoom-handle {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #020617;
+    border-radius: 999px;
+    background: #ffffff;
+    touch-action: none;
+  }
+
+  .zoom-handle-nw {
+    left: calc(var(--zoom-handle-left) - 6px);
+    top: calc(var(--zoom-handle-top) - 6px);
+    cursor: nwse-resize;
+  }
+
+  .zoom-handle-ne {
+    left: calc(var(--zoom-handle-right) - 6px);
+    top: calc(var(--zoom-handle-top) - 6px);
+    cursor: nesw-resize;
+  }
+
+  .zoom-handle-sw {
+    left: calc(var(--zoom-handle-left) - 6px);
+    top: calc(var(--zoom-handle-bottom) - 6px);
+    cursor: nesw-resize;
+  }
+
+  .zoom-handle-se {
+    left: calc(var(--zoom-handle-right) - 6px);
+    top: calc(var(--zoom-handle-bottom) - 6px);
+    cursor: nwse-resize;
   }
 
   .coordinate-zoom-meta {
@@ -1562,6 +1694,7 @@ const calibrationCss = `
   }
 
   .calibration-main {
+    order: 1;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-width: 0;
@@ -1685,9 +1818,20 @@ const calibrationCss = `
     }
 
     .calibration-sidebar {
+      order: 1;
       max-height: 52vh;
-      border-right: 0;
+      border-left: 0;
       border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+    }
+
+    .calibration-main {
+      order: 2;
+    }
+
+    .coordinate-zoom-panel {
+      position: static;
+      width: min(340px, 100%);
+      margin-top: 12px;
     }
   }
 `;

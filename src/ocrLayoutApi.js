@@ -51,6 +51,11 @@ export const ocrLayoutApi = {
   selectWindowUnderMouseDelayed: ({ seconds = 5 } = {}) =>
     request(withQuery('/api/system/select-window-under-mouse-delayed', { seconds })),
 
+  forgetRememberedGameWindow: () =>
+    request('/api/system/forget-remembered-game-window', {
+      method: 'POST'
+    }),
+
   getLayout: () => request('/api/ocr-layout'),
 
   saveLayout: (layout) =>

@@ -72,6 +72,11 @@ export const api = {
       method: 'POST'
     }),
 
+  forgetRememberedGameWindow: () =>
+    request('/api/system/forget-remembered-game-window', {
+      method: 'POST'
+    }),
+
   // City editor
   addCity: (payload) =>
     request('/api/cities', {
