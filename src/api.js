@@ -59,8 +59,6 @@ export const api = {
   health: () => request('/api/health'),
 
   // System / window
-  getMousePosition: () => request('/api/system/mouse-position'),
-
   getGameWindow: () => request('/api/system/game-window'),
 
   getWindowUnderMouseDelayed: ({ seconds = 5 } = {}) =>
@@ -133,12 +131,6 @@ export const api = {
 
   // Settings
   getSettings: () => request('/api/settings'),
-
-  saveOcrZone: (zone) =>
-    request('/api/settings/ocr-zone', {
-      method: 'POST',
-      body: JSON.stringify(zone)
-    }),
 
   saveSetting: (setting) =>
     request('/api/settings/value', {

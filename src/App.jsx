@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Crosshair,
   Map,
-  MousePointer2,
   RefreshCw,
   Settings,
   ShoppingCart,
@@ -28,12 +27,6 @@ const DEFAULT_WAYPOINT_OFFSET_Y = 0;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
 const MAP_IMAGE_URL = '/maps/world-map.png';
-
-const zoneNames = {
-  coordinate: 'Coordinate',
-  city: 'City',
-  price: 'Price'
-};
 
 function sanitizeCityName(value) {
   if (!value) return '';
@@ -336,144 +329,8 @@ function PricesTab({ prices, refreshPrices }) {
   );
 }
 
-function OcrZoneCard({ title, name, description, zone, onSave }) {
-  const [local, setLocal] = useState(
-    zone || {
-      name,
-      topLeftX: 0,
-      topLeftY: 0,
-      bottomRightX: 0,
-      bottomRightY: 0
-    }
-  );
-
-  const [captureStatus, setCaptureStatus] = useState('Manual values');
-
-  useEffect(() => {
-    setLocal(
-      zone || {
-        name,
-        topLeftX: 0,
-        topLeftY: 0,
-        bottomRightX: 0,
-        bottomRightY: 0
-      }
-    );
-  }, [zone, name]);
-
-  const update = (key, value) => {
-    setLocal((current) => ({
-      ...current,
-      [key]: Number(value)
-    }));
-  };
-
-  const waitWithCountdown = async (prefix) => {
-    for (let seconds = 5; seconds > 0; seconds -= 1) {
-      setCaptureStatus(`${prefix} Capturing in ${seconds} second${seconds === 1 ? '' : 's'}...`);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  };
-
-  const captureFlow = async () => {
-    try {
-      await waitWithCountdown('Move mouse to TOP LEFT.');
-      const topLeft = await api.getMousePosition();
-
-      await new Promise((resolve) => setTimeout(resolve, 650));
-
-      await waitWithCountdown('Move mouse to BOTTOM RIGHT.');
-      const bottomRight = await api.getMousePosition();
-
-      const updatedZone = {
-        ...local,
-        name,
-        topLeftX: topLeft.x,
-        topLeftY: topLeft.y,
-        bottomRightX: bottomRight.x,
-        bottomRightY: bottomRight.y
-      };
-
-      setLocal(updatedZone);
-      setCaptureStatus('Capture complete. Saving relative to selected game window if found...');
-
-      await onSave(updatedZone);
-
-      setCaptureStatus(
-        `Saved. Top left: ${topLeft.x},${topLeft.y}. Bottom right: ${bottomRight.x},${bottomRight.y}.`
-      );
-    } catch (err) {
-      setCaptureStatus(`Capture failed: ${err?.message || 'Unknown error'}`);
-    }
-  };
-
-  return (
-    <Card>
-      <div className="card-body">
-        <h3>
-          <Crosshair size={20} /> {title}
-        </h3>
-
-        <p className="muted">{description}</p>
-
-        <div className="zone-grid">
-          <Field label="Top left X">
-            <input
-              className="input"
-              type="number"
-              value={local.topLeftX}
-              onChange={(event) => update('topLeftX', event.target.value)}
-            />
-          </Field>
-
-          <Field label="Top left Y">
-            <input
-              className="input"
-              type="number"
-              value={local.topLeftY}
-              onChange={(event) => update('topLeftY', event.target.value)}
-            />
-          </Field>
-
-          <Field label="Bottom right X">
-            <input
-              className="input"
-              type="number"
-              value={local.bottomRightX}
-              onChange={(event) => update('bottomRightX', event.target.value)}
-            />
-          </Field>
-
-          <Field label="Bottom right Y">
-            <input
-              className="input"
-              type="number"
-              value={local.bottomRightY}
-              onChange={(event) => update('bottomRightY', event.target.value)}
-            />
-          </Field>
-        </div>
-
-        <p className="mini-info">{captureStatus}</p>
-
-        <div className="button-row">
-          <Button variant="secondary" onClick={captureFlow}>
-            <MousePointer2 size={16} /> 5 sec capture flow
-          </Button>
-
-          <Button onClick={() => onSave(local)}>
-            Save zone
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 function SettingsTab({
   settings,
-  zones,
-  saveZone,
   saveSetting,
   setSettings,
   run,
@@ -481,8 +338,6 @@ function SettingsTab({
   refreshCatalogs,
   cities
 }) {
-  const getZone = (name) => zones.find((zone) => zone.name === name);
-
   const saveMapSetting = async (key, value) => {
     setSettings((current) => ({
       ...current,
@@ -499,10 +354,23 @@ function SettingsTab({
     <div className="stack">
       <Card className="dark-panel">
         <div className="card-body">
-          <h2>
-            <Settings size={24} /> OCR + Map Settings
-          </h2>
-          <p>OCR zones are saved relative to the selected game window after setup.</p>
+          <div className="tab-header">
+            <div>
+              <h2>
+                <Settings size={24} /> OCR + Map Settings
+              </h2>
+              <p>OCR zones are saved relative to the selected game window after setup.</p>
+            </div>
+
+            <Button
+              variant="secondary"
+              onClick={() => {
+                window.open('/?calibration=1', '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <Crosshair size={16} /> Open OCR calibration overlay
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -621,31 +489,6 @@ function SettingsTab({
         </Card>
       </div>
 
-      <div className="zone-cards">
-        <OcrZoneCard
-          title="Coordinate OCR zone"
-          name={zoneNames.coordinate}
-          description="One-time setup. Backend stores this zone relative to the selected game window."
-          zone={getZone(zoneNames.coordinate)}
-          onSave={saveZone}
-        />
-
-        <OcrZoneCard
-          title="City OCR zone"
-          name={zoneNames.city}
-          description="One-time setup. Backend follows the game window after this is saved."
-          zone={getZone(zoneNames.city)}
-          onSave={saveZone}
-        />
-
-        <OcrZoneCard
-          title="Item price OCR zone"
-          name={zoneNames.price}
-          description="One-time setup for the trade-good/price area."
-          zone={getZone(zoneNames.price)}
-          onSave={saveZone}
-        />
-      </div>
     </div>
   );
 }
@@ -657,7 +500,6 @@ export default function App() {
   const [latestCity, setLatestCity] = useState(null);
   const [coordinates, setCoordinates] = useState([]);
   const [prices, setPrices] = useState([]);
-  const [zones, setZones] = useState([]);
   const [cities, setCities] = useState([]);
   const [tradeGoods, setTradeGoods] = useState([]);
   const [error, setError] = useState('');
@@ -714,10 +556,6 @@ export default function App() {
   const refreshSettings = useCallback(async () => {
     const data = await run(() => api.getSettings(), 'Could not load settings');
 
-    if (data?.zones) {
-      setZones(data.zones);
-    }
-
     if (data?.settings) {
       setSettings((current) => ({
         ...current,
@@ -763,14 +601,6 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [refreshAll, refreshStatus, refreshCoordinates, refreshPrices, settings.ocrInterval]);
-
-  const saveZone = async (zone) => {
-    const saved = await run(() => api.saveOcrZone(zone), 'Could not save OCR zone');
-
-    if (saved) {
-      await refreshSettings();
-    }
-  };
 
   const saveSetting = async (setting) => {
     await run(() => api.saveSetting(setting), 'Could not save setting');
@@ -880,8 +710,6 @@ export default function App() {
           <SettingsTab
             settings={settings}
             setSettings={setSettings}
-            zones={zones}
-            saveZone={saveZone}
             saveSetting={saveSetting}
             run={run}
             refreshPrices={refreshPrices}
