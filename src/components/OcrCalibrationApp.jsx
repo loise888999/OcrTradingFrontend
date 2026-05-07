@@ -211,6 +211,77 @@ function toLayoutBox(rect, scale, offsetX = 0, offsetY = 0, name = '') {
   };
 }
 
+function buildApiAssetUrl(path) {
+  if (!path) return '';
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${ocrLayoutApi.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function GuidePreview() {
+  const [visible, setVisible] = useState(true);
+
+  if (!visible) return null;
+
+  return (
+    <div className="calibration-debug-preview">
+      <span>Target crop guide</span>
+      <img
+        className="calibration-debug-guide"
+        src="/ocr-preprocess-guide.png"
+        alt="Good OCR crop example"
+        onError={() => setVisible(false)}
+      />
+    </div>
+  );
+}
+
+function CoordinateZoomLens({
+  captureUrl,
+  captureSize,
+  box
+}) {
+  if (!captureUrl || !captureSize.width || !captureSize.height || !box) {
+    return null;
+  }
+
+  const lensWidth = 320;
+  const lensHeight = 180;
+  const zoom = 3;
+  const centerX = Math.max(0, Math.min(captureSize.width, Number(box.x || 0) + Number(box.width || 0) / 2));
+  const centerY = Math.max(0, Math.min(captureSize.height, Number(box.y || 0) + Number(box.height || 0) / 2));
+  const boxWidth = Math.max(1, Number(box.width || 0) * zoom);
+  const boxHeight = Math.max(1, Number(box.height || 0) * zoom);
+
+  return (
+    <div className="coordinate-zoom-panel">
+      <div
+        className="coordinate-zoom-lens"
+        style={{
+          width: lensWidth,
+          height: lensHeight,
+          backgroundImage: `url(${captureUrl})`,
+          backgroundSize: `${captureSize.width * zoom}px ${captureSize.height * zoom}px`,
+          backgroundPosition: `${-(centerX * zoom - lensWidth / 2)}px ${-(centerY * zoom - lensHeight / 2)}px`
+        }}
+      >
+        <div
+          className="coordinate-zoom-box"
+          style={{
+            width: boxWidth,
+            height: boxHeight
+          }}
+        />
+      </div>
+      <div className="coordinate-zoom-meta">
+        <strong>Coordinate zoom</strong>
+        <span>
+          X {box.x}, Y {box.y}, W {box.width}, H {box.height}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function copyBoxFromFirstRow(layout, rowCount, rowGap) {
   const copy = clone(layout);
   const first = copy.price.rows.find((row) => Number(row.index) === 1);
@@ -948,6 +1019,14 @@ export default function OcrCalibrationApp() {
               </label>
             </div>
           )}
+
+          {selection === 'coordinate' && (
+            <CoordinateZoomLens
+              captureUrl={captureUrl}
+              captureSize={captureSize}
+              box={selectedBoxWithName}
+            />
+          )}
         </div>
 
         {message && <div className="calibration-message">{message}</div>}
@@ -955,8 +1034,24 @@ export default function OcrCalibrationApp() {
         {testResult && (
           <div className="calibration-result">
             <strong>OCR result</strong>
+            {testResult.source && <small>Image source: {testResult.source}</small>}
             <pre>{testResult.rawText || '(empty)'}</pre>
             {testResult.debugImagePath && <small>{testResult.debugImagePath}</small>}
+            <div className="calibration-debug-preview-grid">
+              {testResult.debugImageUrl && (
+                <div className="calibration-debug-preview">
+                  <span>Backend OCR image</span>
+                  <img
+                    src={buildApiAssetUrl(testResult.debugImageUrl)}
+                    alt="Preprocessed OCR crop used by backend"
+                  />
+                </div>
+              )}
+              <GuidePreview />
+            </div>
+            <p>
+              Smaller crop zones help performance. Removing extra text, borders, and visual noise inside this test screenshot helps OCR recognition.
+            </p>
           </div>
         )}
 
@@ -1260,7 +1355,84 @@ const calibrationCss = `
   }
 
   .calibration-result small {
+    display: block;
     color: #86efac;
+  }
+
+  .calibration-result p {
+    margin: 8px 0 0;
+    color: #bbf7d0;
+    line-height: 1.4;
+  }
+
+  .calibration-debug-preview-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .calibration-debug-preview {
+    display: grid;
+    gap: 6px;
+  }
+
+  .calibration-debug-preview span {
+    color: #bbf7d0;
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .calibration-debug-preview img {
+    max-width: 100%;
+    max-height: 220px;
+    border: 1px solid rgba(187, 247, 208, 0.35);
+    border-radius: 8px;
+    background: #020617;
+    object-fit: contain;
+    image-rendering: pixelated;
+  }
+
+  .coordinate-zoom-panel {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .coordinate-zoom-lens {
+    position: relative;
+    max-width: 100%;
+    overflow: hidden;
+    border: 1px solid #38bdf8;
+    border-radius: 8px;
+    background-color: #020617;
+    background-repeat: no-repeat;
+    image-rendering: pixelated;
+  }
+
+  .coordinate-zoom-box {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    max-width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+    border: 2px solid #38bdf8;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 999px rgba(2, 6, 23, 0.28);
+    pointer-events: none;
+  }
+
+  .coordinate-zoom-meta {
+    display: grid;
+    gap: 2px;
+    color: #cbd5e1;
+    font-size: 12px;
+  }
+
+  .coordinate-zoom-meta strong {
+    color: #e0f2fe;
+    font-size: 13px;
   }
 
   .calibration-score-panel {
