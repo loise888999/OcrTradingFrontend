@@ -557,6 +557,7 @@ export default function WrappedCoordinateMap({
   const [keepCentered, setKeepCentered] = useState(false);
   const [isFullBrowserMap, setIsFullBrowserMap] = useState(false);
   const [showMapSettings, setShowMapSettings] = useState(false);
+  const [mouseCoordinate, setMouseCoordinate] = useState(null);
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
@@ -904,7 +905,30 @@ export default function WrappedCoordinateMap({
     setLastMouse({ x: event.clientX, y: event.clientY });
   };
 
+  const updateMouseCoordinate = (event) => {
+    const stage = stageRef.current;
+    const currentZoom = zoomRef.current;
+
+    if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) {
+      setMouseCoordinate(null);
+      return;
+    }
+
+    const rect = stage.getBoundingClientRect();
+    const screenX = event.clientX - rect.left;
+    const screenY = event.clientY - rect.top;
+    const worldX = (screenX - panRef.current.x) / currentZoom;
+    const worldY = (screenY - panRef.current.y) / currentZoom;
+
+    setMouseCoordinate({
+      x: Math.round(normalizeX(worldX, worldWidth)),
+      y: Math.round(clampY(worldY, worldHeight))
+    });
+  };
+
   const onMouseMove = (event) => {
+    updateMouseCoordinate(event);
+
     if (!dragging || !lastMouse) return;
 
     if (cityClickRef.current) {
@@ -936,6 +960,11 @@ export default function WrappedCoordinateMap({
     setDragging(false);
     setLastMouse(null);
     cityClickRef.current = null;
+  };
+
+  const handleMouseLeave = () => {
+    setMouseCoordinate(null);
+    endDrag();
   };
 
   const selectCityFromCleanClick = (event, city) => {
@@ -1144,6 +1173,9 @@ export default function WrappedCoordinateMap({
                     City links: {visibleCityMarkers.length}/{cityMarkers.length}
                   </span>
                 )}
+                <span className="map-status-pill status-mouse-coordinate">
+                  Mouse: {mouseCoordinate ? `X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Off map'}
+                </span>
               </div>
             </div>
 
@@ -1257,7 +1289,7 @@ export default function WrappedCoordinateMap({
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseUp={endDrag}
-          onMouseLeave={endDrag}
+          onMouseLeave={handleMouseLeave}
         >
           <svg className="map-svg">
             <rect width="100%" height="100%" className="map-bg" />
@@ -1273,6 +1305,7 @@ export default function WrappedCoordinateMap({
             <strong>Current coordinate</strong>
             <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
             <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
+            <span>{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
             <span>Trail points: {sessionTrailRaw.length}</span>
             <span>
               Trail mode:{' '}

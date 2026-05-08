@@ -3680,6 +3680,12 @@ button.similar-good-chip:hover {
   color: #fef9c3;
 }
 
+.map-status-pill.status-mouse-coordinate {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(20, 184, 166, 0.14);
+  color: #ccfbf1;
+}
+
 .map-toolbar-actions {
   display: flex;
   align-items: center;
