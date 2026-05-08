@@ -4523,20 +4523,54 @@ button.similar-good-chip:hover {
 
 /* Coordinate Map v8: tiny fullscreen windows keep map visible and controls compact */
 .map-full-browser-card {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
+  display: block;
   min-height: 0;
 }
 
 .map-full-browser-card .fullscreen-map-stage,
 .map-full-browser-card .map-stage-full-browser {
-  height: auto;
+  height: 100%;
   min-height: 0;
 }
 
 .map-full-browser-card .map-compact-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
   max-height: 46vh;
   overflow: auto;
+  background: transparent;
+  background-color: transparent;
+  backdrop-filter: none;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.85);
+}
+
+.map-full-browser-card .map-status-pill,
+.map-full-browser-card .toggle,
+.map-full-browser-card .map-toolbar-select-field,
+.map-full-browser-card .city-good-filter-field,
+.map-full-browser-card .map-filter-summary {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.76);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.38);
+  color: #f8fafc;
+}
+
+.map-full-browser-card .map-icon-button,
+.map-full-browser-card .map-compact-button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.35);
+  color: #020617;
+}
+
+.map-full-browser-card .map-icon-button.active {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(219, 234, 254, 0.95);
+  color: #1d4ed8;
 }
 
 .map-full-browser-card .map-title-block h2 {
