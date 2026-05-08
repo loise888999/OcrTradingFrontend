@@ -3612,6 +3612,7 @@ button.similar-good-chip:hover {
 
 .map-toolbar-main-row,
 .map-toolbar-quick-row,
+.map-trail-settings-popover,
 .map-settings-drawer {
   display: flex;
   align-items: center;
@@ -3621,6 +3622,44 @@ button.similar-good-chip:hover {
 
 .map-toolbar-main-row {
   justify-content: space-between;
+}
+
+.map-trail-menu {
+  position: relative;
+  width: fit-content;
+}
+
+.map-good-search-menu {
+  position: relative;
+  display: none;
+  width: fit-content;
+}
+
+.map-trail-menu-button.active,
+.map-good-search-menu-button.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.map-trail-settings-popover,
+.map-good-search-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 24px));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  padding: 8px;
+  background: rgba(2, 6, 23, 0.92);
+  box-shadow: 0 18px 45px rgba(2, 6, 23, 0.35);
+}
+
+.map-toolbar-actions .map-trail-settings-popover,
+.map-toolbar-actions .map-good-search-popover {
+  right: 0;
+  left: auto;
 }
 
 .map-title-block {
@@ -4540,12 +4579,55 @@ button.similar-good-chip:hover {
   right: 0;
   left: 0;
   z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
   max-height: 46vh;
   overflow: auto;
   background: transparent;
   background-color: transparent;
   backdrop-filter: none;
   text-shadow: 0 2px 8px rgba(2, 6, 23, 0.85);
+}
+
+.map-full-browser-card .map-toolbar-main-row {
+  display: contents;
+}
+
+.map-full-browser-card .map-trail-menu {
+  order: 1;
+}
+
+.map-full-browser-card .map-good-search-menu {
+  display: block;
+  order: 2;
+}
+
+.map-full-browser-card .map-title-block {
+  display: none;
+}
+
+.map-full-browser-card .map-toolbar-quick-row {
+  display: none;
+  order: 2;
+}
+
+.map-full-browser-card .map-toolbar-actions {
+  order: 3;
+  margin-left: auto;
+}
+
+.map-full-browser-card .map-settings-drawer {
+  order: 4;
+  width: 100%;
+}
+
+.map-full-browser-card .map-status-pills {
+  order: 2;
+  flex: 1 1 360px;
+  min-width: min(360px, 100%);
+  width: auto;
 }
 
 .map-full-browser-card .map-status-pill,
@@ -4557,6 +4639,13 @@ button.similar-good-chip:hover {
   background: rgba(2, 6, 23, 0.76);
   box-shadow: 0 8px 22px rgba(2, 6, 23, 0.38);
   color: #f8fafc;
+}
+
+.map-full-browser-card .map-trail-settings-popover,
+.map-full-browser-card .map-good-search-popover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.82);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.5);
 }
 
 .map-full-browser-card .map-icon-button,
@@ -4592,9 +4681,6 @@ button.similar-good-chip:hover {
     display: none;
   }
 
-  .map-full-browser-card .map-compact-toolbar:has(.map-settings-drawer) .map-toolbar-quick-row {
-    display: flex;
-  }
 }
 
 @media (max-width: 560px), (max-height: 520px) {

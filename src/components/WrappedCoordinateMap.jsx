@@ -621,6 +621,8 @@ export default function WrappedCoordinateMap({
   const [keepCentered, setKeepCentered] = useState(false);
   const [isFullBrowserMap, setIsFullBrowserMap] = useState(false);
   const [showMapSettings, setShowMapSettings] = useState(false);
+  const [showTrailSettings, setShowTrailSettings] = useState(false);
+  const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
 
   const [precisionMode, setPrecisionMode] = useState(false);
@@ -1250,6 +1252,78 @@ export default function WrappedCoordinateMap({
             </div>
 
             <div className="map-toolbar-actions">
+              <div className="map-trail-menu">
+                <Button
+                  className={`map-compact-button map-trail-menu-button ${showTrailSettings ? 'active' : ''}`}
+                  onClick={() => setShowTrailSettings((value) => !value)}
+                  title="Trail settings"
+                >
+                  <Eraser size={16} /> Trail
+                </Button>
+
+                {showTrailSettings && (
+                  <div className="map-trail-settings-popover">
+                    <label className="map-toolbar-select-field" title="Trail duration">
+                      <span>Trail</span>
+                      <select
+                        className="input"
+                        value={trailWindow}
+                        onChange={(event) => setTrailWindow(event.target.value)}
+                      >
+                        <option value="30m">30 min</option>
+                        <option value="2h">2 hours</option>
+                        <option value="session">Session</option>
+                      </select>
+                    </label>
+
+                    <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
+
+                    <Button className="map-compact-button" onClick={eraseTrail} disabled={!current}>
+                      <Eraser size={16} /> Clear
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="map-good-search-menu">
+                <Button
+                  className={`map-compact-button map-good-search-menu-button ${showGoodSearchSettings ? 'active' : ''}`}
+                  onClick={() => setShowGoodSearchSettings((value) => !value)}
+                  title="Buy good search"
+                >
+                  Buy good
+                </Button>
+
+                {showGoodSearchSettings && (
+                  <div className="map-good-search-popover">
+                    {showCityLayer && (
+                      <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
+                        <span>Buy good</span>
+                        <input
+                          className="input city-good-filter-input"
+                          value={cityGoodSearch}
+                          onChange={(event) => setCityGoodSearch(event.target.value)}
+                          placeholder="Example: Diamond"
+                          list="map-buy-good-options"
+                        />
+
+                        {cityGoodSearch && (
+                          <button
+                            type="button"
+                            className="city-good-filter-clear"
+                            onClick={() => setCityGoodSearch('')}
+                            aria-label="Clear buy-good search"
+                            title="Clear"
+                          >
+                            Ã—
+                          </button>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <Button className="map-icon-button" onClick={() => zoomByButton(1 / 1.14)} title="Zoom out">
                 <ZoomOut size={16} />
               </Button>
@@ -1260,10 +1334,6 @@ export default function WrappedCoordinateMap({
 
               <Button className="map-compact-button" onClick={() => centerOnCurrent()}>
                 Center
-              </Button>
-
-              <Button className="map-compact-button" onClick={eraseTrail} disabled={!current}>
-                <Eraser size={16} /> Trail
               </Button>
 
               <Toggle
@@ -1296,19 +1366,6 @@ export default function WrappedCoordinateMap({
           </div>
 
           <div className="map-toolbar-quick-row">
-            <label className="map-toolbar-select-field" title="Trail duration">
-              <span>Trail</span>
-              <select
-                className="input"
-                value={trailWindow}
-                onChange={(event) => setTrailWindow(event.target.value)}
-              >
-                <option value="30m">30 min</option>
-                <option value="2h">2 hours</option>
-                <option value="session">Session</option>
-              </select>
-            </label>
-
             {showCityLayer && (
               <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
                 <span>Buy good</span>
@@ -1352,7 +1409,6 @@ export default function WrappedCoordinateMap({
               <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
-              <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
               <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
             </div>
