@@ -35,7 +35,7 @@ The frontend lets the user:
 
 - connect to the OCR backend
 - select the game window
-- configure OCR zones
+- configure OCR boxes
 - start and stop OCR
 - view detected city and coordinates
 - track position on a map
@@ -165,7 +165,7 @@ The Settings tab is where the user configures OCR and sharing.
 The user can:
 
 - select the game window
-- configure OCR zones
+- configure OCR boxes
 - configure map/world settings
 - configure OCR timing
 - import/export price data
@@ -175,9 +175,9 @@ The user can:
 
 ## OCR setup guide
 
-The most important setup step is selecting the correct OCR zones.
+The most important setup step is selecting the correct OCR boxes.
 
-Each OCR zone should include only the text that belongs to that zone. If the zone is too large, OCR may read extra text and parse the wrong value. If the zone is too small, OCR may miss part of the text.
+Each OCR box should include only the text that belongs to that box. If the box is too large, OCR may read extra text and parse the wrong value. If the box is too small, OCR may miss part of the text.
 
 ---
 
@@ -191,53 +191,53 @@ Settings → Game Window
 
 Use the game window selection tool.
 
-The backend saves OCR zones relative to the selected game window. This helps the OCR keep working even if the game window moves.
+The backend saves OCR boxes relative to the selected game window. This helps OCR keep working even if the game window moves.
+
+Then open the OCR calibration screen and click:
+
+```text
+Capture screen / game window
+```
+
+Use the screenshot to drag and resize each selected box. Click **Test selected box OCR** to check each box, then click **Save layout** when all boxes look correct.
 
 ---
 
-### Step 2 — Set the Coordinate OCR zone
+### Step 2 — Set the Coordinate box
 
-The Coordinate OCR zone should cover only the coordinate text.
+The Coordinate box should cover only the coordinate text.
 
 Example:
 
-![Coordinate OCR zone](docs/images/CoordinateOCR.png)
+![Coordinate OCR setup](docs/images/OCR%20Coordinate%20setup.png)
 
-Use this zone for the part of the screen where the game shows the current X/Y position.
+Use this box for the part of the screen where the game shows the current X/Y position.
 
 Recommended:
 
 - include the full coordinate text
 - avoid nearby icons or unrelated text
 - keep the box tight but not too tight
-- test by starting OCR and checking the Coordinate Map
+- test the selected box before saving
+- start OCR and check the Coordinate Map after saving
 
-In Settings, use:
+In OCR calibration, use:
 
 ```text
-Coordinate OCR zone → 5 sec capture flow
+Selected box → Coordinate
 ```
-
-The capture flow works like this:
-
-1. Click **5 sec capture flow**
-2. Move your mouse to the top-left corner of the coordinate text
-3. Wait for capture
-4. Move your mouse to the bottom-right corner of the coordinate text
-5. Wait for capture
-6. The zone is saved
 
 ---
 
-### Step 3 — Set the City OCR zone
+### Step 3 — Set the City region box
 
-The City OCR zone should cover only the current city/location name.
+The City region box should cover only the current city/location name.
 
 Example:
 
-![City OCR zone](docs/images/CityOCR.png)
+![City OCR setup](docs/images/OCR%20City%20name%20setup.png)
 
-Use this zone for the part of the screen where the game shows the current city.
+Use this box for the part of the screen where the game shows the current city.
 
 Recommended:
 
@@ -245,6 +245,12 @@ Recommended:
 - avoid nearby UI text
 - avoid big decorative UI elements
 - test by checking the city badge at the top of the app
+
+In OCR calibration, use:
+
+```text
+Selected box → City region
+```
 
 The city detected by OCR is shown in the app status bar:
 
@@ -254,34 +260,90 @@ City: Alexandria
 
 ---
 
-### Step 4 — Set the Trade Price OCR zone
+### Step 4 — Set the row-selection boxes
 
-The Trade Price OCR zone should cover the trade-good list and price area.
+The row-selection boxes should cover the visible trade-good rows.
 
 Example:
 
-![Trade OCR zone](docs/images/tradeOCR.png)
+![Row Selection OCR setup](docs/images/OCR%20Row%20Selection%20setup.png)
 
-This zone is used to detect:
+Use these boxes for the rows that contain trade-good names and prices.
+
+Recommended:
+
+- cover one full row at a time
+- include item name, price, and multiplier area
+- avoid buttons, tabs, headers, and unrelated text
+- use **Advanced row setup** only if you need more or fewer visible rows
+- test one row before applying the same shape to other rows
+
+In OCR calibration, use:
+
+```text
+Selected box → Row 1 whole row
+```
+
+Then adjust the other row boxes if needed.
+
+---
+
+### Step 5 — Set the Buy region box
+
+The Buy region box should cover only the game text or marker that proves the trade screen is in Buy mode.
+
+Example:
+
+![Buy OCR setup](docs/images/OCR%20Buy%20setup.png)
+
+Recommended:
+
+- include only the Buy label/marker
+- avoid Sell text or nearby buttons
+- keep the box small and focused
+- test the selected box before saving
+
+In OCR calibration, use:
+
+```text
+Selected box → Buy region
+```
+
+---
+
+### Step 6 — Set the Sell region box
+
+The Sell region box should cover only the game text or marker that proves the trade screen is in Sell mode.
+
+Example:
+
+![Sell OCR setup](docs/images/OCR%20Sell%20setup.png)
+
+Recommended:
+
+- include only the Sell label/marker
+- avoid Buy text or nearby buttons
+- keep the box small and focused
+- test the selected box before saving
+
+In OCR calibration, use:
+
+```text
+Selected box → Sell region
+```
+
+After all boxes are set, save the layout, start OCR, and open the game's trade screen. Captured prices should appear in:
+
+```text
+Buy / Sell Prices
+```
+
+The OCR boxes are used together to detect:
 
 - trade-good name
 - price
 - multiplier
 - buy/sell type
-
-Recommended:
-
-- include the item name and price together
-- include enough width for long item names
-- include enough height for visible rows
-- avoid unrelated menus or buttons
-- keep the OCR area focused on the trade list
-
-After this zone is set, start OCR and open the game’s trade screen. Captured prices should appear in:
-
-```text
-Buy / Sell Prices
-```
 
 ---
 
@@ -398,11 +460,13 @@ Restart the Vite dev server after changing `.env`.
 
 6. Select the game window.
 
-7. Configure OCR zones:
+7. Configure OCR boxes:
 
    - Coordinate
-   - City
-   - Trade Price
+   - City region
+   - Row selection
+   - Buy region
+   - Sell region
 
 8. Start OCR.
 
@@ -485,26 +549,26 @@ Use one of those frontend ports, or update the backend CORS policy.
 
 ### OCR detects the wrong coordinate
 
-Check the Coordinate OCR zone.
+Check the Coordinate box.
 
 Common causes:
 
-- zone includes extra UI text
-- zone does not include the full coordinate
-- game window was moved before saving relative zones
+- box includes extra UI text
+- box does not include the full coordinate
+- game window was moved before saving relative boxes
 - Windows scaling changed
 
-Re-select the game window and save the Coordinate OCR zone again.
+Re-select the game window and save the Coordinate box again.
 
 ---
 
 ### OCR detects the wrong city
 
-Check the City OCR zone.
+Check the City region box.
 
 Common causes:
 
-- zone includes other nearby text
+- box includes other nearby text
 - city name is partially cut off
 - city is missing from `Data/cities.csv`
 - city needs an alias
@@ -513,12 +577,13 @@ Common causes:
 
 ### OCR detects wrong trade goods
 
-Check the Trade Price OCR zone.
+Check the row-selection, Buy region, and Sell region boxes.
 
 Common causes:
 
-- zone is too large
-- zone includes buttons or unrelated UI text
+- row-selection box is too large
+- row-selection box includes buttons or unrelated UI text
+- Buy or Sell region box includes the wrong mode label
 - item name is partially cut off
 - trade good is missing from `Data/trade-goods.csv`
 - OCR needs aliases for common mistakes
@@ -575,13 +640,14 @@ public/
 
 docs/
   images/
-    CoordinatePage.png
     PriceHistory.png
     SettingPage.png
     TradingPage.png
-    CoordinateOCR.png
-    CityOCR.png
-    tradeOCR.png
+    OCR Buy setup.png
+    OCR City name setup.png
+    OCR Coordinate setup.png
+    OCR Row Selection setup.png
+    OCR Sell setup.png
 ```
 
 ---
