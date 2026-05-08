@@ -29,6 +29,9 @@ const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 8;
 const MAP_IMAGE_URL = '/maps/world-map.png';
+const PRICE_HISTORY_INITIAL_VISIBLE = 20;
+const PRICE_HISTORY_LOAD_STEP = 20;
+const PRICE_HISTORY_MAX_VISIBLE = 500;
 
 function sanitizeCityName(value) {
   if (!value) return '';
@@ -75,6 +78,33 @@ function getPriceRowItem(row) {
 
 function getPriceRowTradeType(row) {
   return row?.tradeType || row?.type || '';
+}
+
+function getPriceRowCapturedTime(row) {
+  const value = row?.capturedAtUtc ?? row?.CapturedAtUtc ?? row?.createdAtUtc ?? row?.CreatedAtUtc;
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getLatestPriceRowsByCityGood(rows) {
+  const latestByCityGood = new globalThis.Map();
+
+  rows.forEach((row, index) => {
+    const city = sanitizeCityName(row.city);
+    const item = getPriceRowItem(row);
+    const tradeType = getPriceRowTradeType(row);
+    const key = `${city.toLowerCase()}|${item.toLowerCase()}|${tradeType.toLowerCase()}`;
+    const capturedTime = getPriceRowCapturedTime(row);
+    const current = latestByCityGood.get(key);
+
+    if (!current || capturedTime > current.capturedTime || (capturedTime === current.capturedTime && index > current.index)) {
+      latestByCityGood.set(key, { row, capturedTime, index });
+    }
+  });
+
+  return [...latestByCityGood.values()]
+    .sort((left, right) => right.capturedTime - left.capturedTime || right.index - left.index)
+    .map((entry) => entry.row);
 }
 
 function Button({ children, className = '', variant = 'primary', ...props }) {
@@ -258,15 +288,40 @@ function CoordinateMap({
 
 function PricesTab({ prices, refreshPrices, run }) {
   const [query, setQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(PRICE_HISTORY_INITIAL_VISIBLE);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteMatching, setDeleteMatching] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const rows = prices.filter((row) =>
-    `${sanitizeCityName(row.city)} ${getPriceRowItem(row)} ${getPriceRowTradeType(row)}`
-      .toLowerCase()
-      .includes(query.toLowerCase())
+  const normalizedQuery = query.trim().toLowerCase();
+  const hasSearch = normalizedQuery.length > 0;
+
+  useEffect(() => {
+    setVisibleLimit(PRICE_HISTORY_INITIAL_VISIBLE);
+  }, [normalizedQuery]);
+
+  const latestRows = useMemo(() => getLatestPriceRowsByCityGood(prices), [prices]);
+
+  const matchingRows = useMemo(
+    () =>
+      latestRows.filter((row) =>
+        `${sanitizeCityName(row.city)} ${getPriceRowItem(row)} ${getPriceRowTradeType(row)} ${row.tradeGoodType || ''}`
+          .toLowerCase()
+          .includes(normalizedQuery)
+      ),
+    [latestRows, normalizedQuery]
   );
+
+  const cappedRows = matchingRows.slice(0, PRICE_HISTORY_MAX_VISIBLE);
+  const rows = cappedRows.slice(0, visibleLimit);
+  const canLoadMore = rows.length < cappedRows.length;
+  const hiddenCount = Math.max(0, cappedRows.length - rows.length);
+
+  const loadMoreRows = () => {
+    setVisibleLimit((current) =>
+      Math.min(PRICE_HISTORY_MAX_VISIBLE, current + PRICE_HISTORY_LOAD_STEP)
+    );
+  };
 
   const openDeleteConfirm = (row) => {
     setDeleteTarget(row);
@@ -407,6 +462,16 @@ function PricesTab({ prices, refreshPrices, run }) {
           </div>
         </div>
 
+        <div className="price-history-summary">
+          <span>
+            Showing {rows.length} of {cappedRows.length} latest city + trade-good records
+            {hasSearch ? ` matching "${query.trim()}"` : ''}.
+          </span>
+          {matchingRows.length > PRICE_HISTORY_MAX_VISIBLE && (
+            <span>Limited to newest {PRICE_HISTORY_MAX_VISIBLE} matches.</span>
+          )}
+        </div>
+
         <SortableTable
           columns={columns}
           rows={rows}
@@ -414,6 +479,15 @@ function PricesTab({ prices, refreshPrices, run }) {
           initialSortKey="capturedAtUtc"
           initialDirection="desc"
         />
+
+        {canLoadMore && (
+          <div className="price-history-load-more">
+            <Button variant="secondary" onClick={loadMoreRows}>
+              Load 20 more
+            </Button>
+            <span className="muted">{hiddenCount} more available</span>
+          </div>
+        )}
 
         {deleteTarget && (
           <div className="modal-backdrop" role="presentation">
