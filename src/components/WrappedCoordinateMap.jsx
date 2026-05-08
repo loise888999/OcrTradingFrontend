@@ -661,6 +661,7 @@ export default function WrappedCoordinateMap({
     if (!isFullBrowserMap) return undefined;
 
     document.body.classList.add('map-full-browser-active');
+    setShowGoodSearchSettings(true);
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {

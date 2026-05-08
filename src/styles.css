@@ -4584,7 +4584,7 @@ button.similar-good-chip:hover {
   align-items: flex-start;
   justify-content: space-between;
   max-height: 46vh;
-  overflow: auto;
+  overflow: visible;
   background: transparent;
   background-color: transparent;
   backdrop-filter: none;
@@ -4756,4 +4756,99 @@ button.similar-good-chip:hover {
   .map-full-browser-card .map-info-mouse {
     display: none;
   }
+}
+
+/* Coordinate Map v9: embedded map uses screen space like fullscreen */
+.coordinate-map-shell:not(.map-full-browser-shell) .coordinate-map-card {
+  position: relative;
+  display: block;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .fullscreen-map-stage {
+  height: calc(100vh - 150px);
+  min-height: 620px;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-height: 42vh;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+  background-color: transparent;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.85);
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-main-row {
+  display: contents;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-title-block {
+  display: none;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-quick-row {
+  display: none;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-actions {
+  order: 3;
+  margin-left: auto;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-settings-drawer {
+  order: 4;
+  width: 100%;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-status-pills {
+  order: 2;
+  flex: 1 1 360px;
+  min-width: min(360px, 100%);
+  width: auto;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-status-pill,
+.coordinate-map-shell:not(.map-full-browser-shell) .toggle,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-select-field,
+.coordinate-map-shell:not(.map-full-browser-shell) .city-good-filter-field,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-filter-summary {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.76);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.38);
+  color: #f8fafc;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-icon-button,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.35);
+  color: #020617;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-icon-button.active,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-button.active {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(219, 234, 254, 0.95);
+  color: #1d4ed8;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-menu {
+  display: block;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-trail-settings-popover,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-popover {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.82);
+  box-shadow: 0 14px 34px rgba(2, 6, 23, 0.5);
 }
