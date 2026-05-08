@@ -8,6 +8,7 @@ import {
   Settings,
   ShoppingCart,
   SlidersHorizontal,
+  Trash2,
   TrendingUp
 } from 'lucide-react';
 import { api } from './api';
@@ -62,6 +63,18 @@ function formatDate(value) {
   if (!value) return '';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function getPriceRowId(row) {
+  return row?.id ?? row?.priceHistoryId ?? row?.priceId ?? row?.Id ?? null;
+}
+
+function getPriceRowItem(row) {
+  return row?.itemName || row?.item || row?.name || '';
+}
+
+function getPriceRowTradeType(row) {
+  return row?.tradeType || row?.type || '';
 }
 
 function Button({ children, className = '', variant = 'primary', ...props }) {
@@ -243,14 +256,56 @@ function CoordinateMap({
   );
 }
 
-function PricesTab({ prices, refreshPrices }) {
+function PricesTab({ prices, refreshPrices, run }) {
   const [query, setQuery] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteMatching, setDeleteMatching] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const rows = prices.filter((row) =>
-    `${sanitizeCityName(row.city)} ${row.itemName || row.item} ${row.tradeType || row.type}`
+    `${sanitizeCityName(row.city)} ${getPriceRowItem(row)} ${getPriceRowTradeType(row)}`
       .toLowerCase()
       .includes(query.toLowerCase())
   );
+
+  const openDeleteConfirm = (row) => {
+    setDeleteTarget(row);
+    setDeleteMatching(false);
+  };
+
+  const closeDeleteConfirm = () => {
+    if (isDeleting) return;
+    setDeleteTarget(null);
+    setDeleteMatching(false);
+  };
+
+  const deleteSelectedPrice = async () => {
+    if (!deleteTarget) return;
+
+    const id = getPriceRowId(deleteTarget);
+    if (!deleteMatching && id == null) return;
+
+    setIsDeleting(true);
+    const city = sanitizeCityName(deleteTarget.city);
+    const item = getPriceRowItem(deleteTarget);
+    const tradeType = getPriceRowTradeType(deleteTarget);
+
+    const result = await run(
+      () =>
+        deleteMatching
+          ? api.deletePriceHistoryMatches({ city, item, tradeType })
+          : api.deletePriceHistoryEntry(id),
+      'Could not delete price history'
+    );
+
+    setIsDeleting(false);
+
+    if (result !== null) {
+      setDeleteTarget(null);
+      setDeleteMatching(false);
+      await refreshPrices();
+    }
+  };
 
   const columns = [
     {
@@ -303,8 +358,29 @@ function PricesTab({ prices, refreshPrices }) {
       label: 'Captured',
       sortable: true,
       render: (row) => formatDate(row.capturedAtUtc)
+    },
+    {
+      key: 'actions',
+      label: 'Actions',
+      render: (row) => (
+        <Button
+          variant="danger"
+          className="compact-action price-delete-button"
+          onClick={() => openDeleteConfirm(row)}
+          title="Delete this price history entry"
+          aria-label={`Delete ${getPriceRowItem(row)} price history entry`}
+        >
+          <Trash2 size={16} /> Delete
+        </Button>
+      )
     }
   ];
+
+  const deleteTargetId = getPriceRowId(deleteTarget);
+  const deleteTargetCity = sanitizeCityName(deleteTarget?.city);
+  const deleteTargetItem = getPriceRowItem(deleteTarget);
+  const deleteTargetTradeType = getPriceRowTradeType(deleteTarget);
+  const canConfirmDelete = Boolean(deleteTarget) && (deleteMatching || deleteTargetId != null);
 
   return (
     <Card>
@@ -338,6 +414,79 @@ function PricesTab({ prices, refreshPrices }) {
           initialSortKey="capturedAtUtc"
           initialDirection="desc"
         />
+
+        {deleteTarget && (
+          <div className="modal-backdrop" role="presentation">
+            <div
+              className="confirm-dialog price-delete-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-price-title"
+            >
+              <div>
+                <h3 id="delete-price-title">
+                  <Trash2 size={20} /> Delete price entry?
+                </h3>
+                <p className="muted">
+                  Remove bad OCR data from Buy / Sell Price History.
+                </p>
+              </div>
+
+              <dl className="delete-price-details">
+                <div>
+                  <dt>City</dt>
+                  <dd>{deleteTargetCity || 'Unknown'}</dd>
+                </div>
+                <div>
+                  <dt>Item</dt>
+                  <dd>{deleteTargetItem || 'Unknown'}</dd>
+                </div>
+                <div>
+                  <dt>Trade</dt>
+                  <dd>{deleteTargetTradeType || 'Unknown'}</dd>
+                </div>
+                <div>
+                  <dt>Price</dt>
+                  <dd>{deleteTarget.price || 'No price'}</dd>
+                </div>
+                <div>
+                  <dt>Captured</dt>
+                  <dd>{formatDate(deleteTarget.capturedAtUtc) || 'Unknown'}</dd>
+                </div>
+              </dl>
+
+              {deleteTargetId == null && !deleteMatching && (
+                <div className="danger-info mini-info">
+                  This row has no stable id, so single-row delete is unavailable. Choose matching delete to remove city + item + Buy/Sell records.
+                </div>
+              )}
+
+              <label className="inline-checkbox delete-matching-checkbox">
+                <input
+                  type="checkbox"
+                  checked={deleteMatching}
+                  onChange={(event) => setDeleteMatching(event.target.checked)}
+                  disabled={isDeleting}
+                />
+                <span>Delete all matching records for this city, item, and Buy/Sell type</span>
+              </label>
+
+              <div className="deal-actions price-delete-actions">
+                <Button variant="secondary" onClick={closeDeleteConfirm} disabled={isDeleting}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={deleteSelectedPrice}
+                  disabled={isDeleting || !canConfirmDelete}
+                >
+                  <Trash2 size={16} />
+                  {isDeleting ? 'Deleting...' : deleteMatching ? 'Delete matching' : 'Delete entry'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -736,6 +885,7 @@ export default function App() {
           <PricesTab
             prices={prices}
             refreshPrices={refreshPrices}
+            run={run}
           />
         )}
 

@@ -165,6 +165,16 @@ export const api = {
   getPriceHistory: ({ city = '', item = '', tradeType = '', take = 250 } = {}) =>
     request(withQuery('/api/prices/history', { city, item, tradeType, take })),
 
+  deletePriceHistoryEntry: (id) =>
+    request(`/api/prices/history/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+
+  deletePriceHistoryMatches: ({ city = '', item = '', tradeType = '' } = {}) =>
+    request(withQuery('/api/prices/history', { city, item, tradeType }), {
+      method: 'DELETE'
+    }),
+
   // Catalogs
   getCities: () => request('/api/cities'),
 
