@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eraser, Map, MapPin, Maximize2, Minimize2, RefreshCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eraser, Eye, EyeOff, Map, MapPin, Maximize2, Minimize2, RefreshCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
 
 const MAP_IMAGE_URL = '/maps/world-map.png';
 const MAP_PIXEL_WIDTH = 4096;
@@ -623,6 +623,7 @@ export default function WrappedCoordinateMap({
   const [showMapSettings, setShowMapSettings] = useState(false);
   const [showTrailSettings, setShowTrailSettings] = useState(false);
   const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
+  const [showMapInfo, setShowMapInfo] = useState(true);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
 
   const [precisionMode, setPrecisionMode] = useState(false);
@@ -1336,6 +1337,14 @@ export default function WrappedCoordinateMap({
                 Center
               </Button>
 
+              <Button
+                className={`map-icon-button ${showMapInfo ? 'active' : ''}`}
+                onClick={() => setShowMapInfo((value) => !value)}
+                title={showMapInfo ? 'Hide current coordinate box' : 'Show current coordinate box'}
+              >
+                {showMapInfo ? <Eye size={16} /> : <EyeOff size={16} />}
+              </Button>
+
               <Toggle
                 checked={showCityLayer}
                 onChange={setShowCityLayer}
@@ -1453,6 +1462,7 @@ export default function WrappedCoordinateMap({
             </g>
           </svg>
 
+          {showMapInfo && (
           <div className="map-info">
             <strong>Current coordinate</strong>
             <span className="map-info-row map-info-ocr">{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
@@ -1473,6 +1483,7 @@ export default function WrappedCoordinateMap({
               <span className="map-info-row map-info-buy-matches">Buy good matches: {highlightedBuyCityNames.size}</span>
             )}
           </div>
+          )}
 
           {showCityLayer && selectedCity && (
             <SelectedCityPanel
