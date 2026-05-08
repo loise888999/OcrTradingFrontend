@@ -4520,3 +4520,120 @@ button.similar-good-chip:hover {
   background: rgba(148, 163, 184, 0.18);
   color: #e2e8f0;
 }
+
+/* Coordinate Map v8: tiny fullscreen windows keep map visible and controls compact */
+.map-full-browser-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.map-full-browser-card .fullscreen-map-stage,
+.map-full-browser-card .map-stage-full-browser {
+  height: auto;
+  min-height: 0;
+}
+
+.map-full-browser-card .map-compact-toolbar {
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.map-full-browser-card .map-title-block h2 {
+  display: none;
+}
+
+.map-full-browser-card .map-title-block,
+.map-full-browser-card .map-toolbar-actions,
+.map-full-browser-card .map-toolbar-quick-row,
+.map-full-browser-card .map-settings-drawer {
+  min-width: 0;
+}
+
+@media (max-width: 900px), (max-height: 650px) {
+  .map-full-browser-card .map-status-pill.status-city-links,
+  .map-full-browser-card .map-status-pill.status-mouse-coordinate,
+  .map-full-browser-card .map-primary-city-toggle,
+  .map-full-browser-card .map-toolbar-quick-row {
+    display: none;
+  }
+
+  .map-full-browser-card .map-compact-toolbar:has(.map-settings-drawer) .map-toolbar-quick-row {
+    display: flex;
+  }
+}
+
+@media (max-width: 560px), (max-height: 520px) {
+  .map-full-browser-card .map-compact-toolbar {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .map-full-browser-card .map-toolbar-actions {
+    gap: 4px;
+  }
+
+  .map-full-browser-card .map-icon-button,
+  .map-full-browser-card .map-compact-button {
+    min-height: 30px;
+    min-width: 32px;
+    padding: 6px 8px;
+  }
+
+  .map-full-browser-card .toggle {
+    padding: 5px 8px 5px 6px;
+    font-size: 12px;
+  }
+
+  .map-full-browser-card .map-info {
+    left: 8px;
+    bottom: 8px;
+    max-width: min(260px, calc(100% - 16px));
+    max-height: 42%;
+    overflow: auto;
+    padding: 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 420px), (max-height: 420px) {
+  .map-full-browser-card .map-info {
+    display: none;
+  }
+}
+
+@media (max-width: 780px), (max-height: 620px) {
+  .map-full-browser-card .map-info {
+    gap: 3px;
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .map-full-browser-card .map-info-direction,
+  .map-full-browser-card .map-info-trail-mode,
+  .map-full-browser-card .map-info-city-links {
+    display: none;
+  }
+}
+
+@media (max-width: 620px), (max-height: 520px) {
+  .map-full-browser-card .map-info {
+    max-width: min(230px, calc(100% - 16px));
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .map-full-browser-card .map-info-trail-count,
+  .map-full-browser-card .map-info-zoom,
+  .map-full-browser-card .map-info-buy-matches {
+    display: none;
+  }
+}
+
+@media (max-width: 500px), (max-height: 460px) {
+  .map-full-browser-card .map-info strong,
+  .map-full-browser-card .map-info-map,
+  .map-full-browser-card .map-info-mouse {
+    display: none;
+  }
+}

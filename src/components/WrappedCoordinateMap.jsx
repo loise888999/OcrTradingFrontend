@@ -29,6 +29,21 @@ function normalizePanX(panX, worldWidth, zoom) {
   return normalized;
 }
 
+function clampPanY(panY, worldHeight, zoom, viewportHeight) {
+  const mapPx = worldHeight * zoom;
+  const height = Number(viewportHeight);
+
+  if (!Number.isFinite(mapPx) || mapPx <= 0 || !Number.isFinite(height) || height <= 0) {
+    return panY;
+  }
+
+  if (mapPx <= height) {
+    return (height - mapPx) / 2;
+  }
+
+  return Math.min(0, Math.max(height - mapPx, panY));
+}
+
 function clampY(value, height) {
   return Math.max(0, Math.min(height, Number(value || 0)));
 }
@@ -412,11 +427,11 @@ function Card({ children, className = '' }) {
   return <section className={`card ${className}`}>{children}</section>;
 }
 
-function Toggle({ checked, onChange, label }) {
+function Toggle({ checked, onChange, label, className = '' }) {
   return (
     <button
       type="button"
-      className={`toggle ${checked ? 'toggle-on' : ''}`}
+      className={`toggle ${checked ? 'toggle-on' : ''} ${className}`}
       onClick={() => onChange(!checked)}
     >
       <span className="toggle-switch" />
@@ -868,13 +883,13 @@ export default function WrappedCoordinateMap({
 
       const nextPan = {
         x: normalizePanX(rect.width / 2 - displayCurrent.x * targetZoom, worldWidth, targetZoom),
-        y: rect.height / 2 - displayCurrent.y * targetZoom
+        y: clampPanY(rect.height / 2 - displayCurrent.y * targetZoom, worldHeight, targetZoom, rect.height)
       };
 
       panRef.current = nextPan;
       setPan(nextPan);
     },
-    [displayCurrent, worldWidth]
+    [displayCurrent, worldHeight, worldWidth]
   );
 
   useEffect(() => {
@@ -888,6 +903,16 @@ export default function WrappedCoordinateMap({
         width: rect.width || 1200,
         height: rect.height || 700
       });
+
+      setPan((currentPan) => {
+        const nextPan = {
+          ...currentPan,
+          y: clampPanY(currentPan.y, worldHeight, zoomRef.current, rect.height || 700)
+        };
+
+        panRef.current = nextPan;
+        return nextPan;
+      });
     };
 
     updateSize();
@@ -896,7 +921,7 @@ export default function WrappedCoordinateMap({
     observer.observe(stage);
 
     return () => observer.disconnect();
-  }, []);
+  }, [worldHeight]);
 
   useEffect(() => {
     if (keepCentered) centerOnCurrent();
@@ -927,11 +952,11 @@ export default function WrappedCoordinateMap({
         keepCentered && displayCurrent
           ? {
               x: normalizePanX(rect.width / 2 - displayCurrent.x * nextZoom, worldWidth, nextZoom),
-              y: rect.height / 2 - displayCurrent.y * nextZoom
+              y: clampPanY(rect.height / 2 - displayCurrent.y * nextZoom, worldHeight, nextZoom, rect.height)
             }
           : {
               x: normalizePanX(mouseX - worldMouseX * nextZoom, worldWidth, nextZoom),
-              y: mouseY - worldMouseY * nextZoom
+              y: clampPanY(mouseY - worldMouseY * nextZoom, worldHeight, nextZoom, rect.height)
             };
 
       zoomRef.current = nextZoom;
@@ -944,7 +969,7 @@ export default function WrappedCoordinateMap({
     stage.addEventListener('wheel', handleWheel, { passive: false });
 
     return () => stage.removeEventListener('wheel', handleWheel);
-  }, [keepCentered, displayCurrent, worldWidth]);
+  }, [keepCentered, displayCurrent, worldHeight, worldWidth]);
 
   const onMouseDown = (event) => {
     event.preventDefault();
@@ -997,10 +1022,16 @@ export default function WrappedCoordinateMap({
     }
 
     const currentZoom = zoomRef.current;
+    const rect = stageRef.current?.getBoundingClientRect();
 
     const nextPan = {
       x: normalizePanX(panRef.current.x + event.clientX - lastMouse.x, worldWidth, currentZoom),
-      y: panRef.current.y + event.clientY - lastMouse.y
+      y: clampPanY(
+        panRef.current.y + event.clientY - lastMouse.y,
+        worldHeight,
+        currentZoom,
+        rect?.height || viewportSize.height
+      )
     };
 
     setPan(nextPan);
@@ -1046,9 +1077,11 @@ export default function WrappedCoordinateMap({
     if (keepCentered) {
       centerOnCurrent(nextZoom);
     } else {
+      const rect = stageRef.current?.getBoundingClientRect();
       const nextPan = {
         ...panRef.current,
-        x: normalizePanX(panRef.current.x, worldWidth, nextZoom)
+        x: normalizePanX(panRef.current.x, worldWidth, nextZoom),
+        y: clampPanY(panRef.current.y, worldHeight, nextZoom, rect?.height || viewportSize.height)
       };
 
       setPan(nextPan);
@@ -1214,26 +1247,6 @@ export default function WrappedCoordinateMap({
               <h2>
                 <Map size={20} /> Full Window Wrapped Map
               </h2>
-
-              <div className="map-status-pills">
-                <span className={`map-status-pill ${ocrRunning ? 'status-running' : ocrRunningState == null ? 'status-unknown' : 'status-stopped'}`}>
-                  OCR: {ocrStatusLabel}
-                </span>
-                <span className="map-status-pill status-city">
-                  City: {latestCityName || 'Unknown'}
-                </span>
-                <span className="map-status-pill status-speed">
-                  Speed: {coordinateSpeedLabel} kt
-                </span>
-                {showCityLayer && (
-                  <span className="map-status-pill status-city-links">
-                    City links: {visibleCityMarkers.length}/{cityMarkers.length}
-                  </span>
-                )}
-                <span className="map-status-pill status-mouse-coordinate">
-                  Mouse: {mouseCoordinate ? `X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Off map'}
-                </span>
-              </div>
             </div>
 
             <div className="map-toolbar-actions">
@@ -1253,7 +1266,12 @@ export default function WrappedCoordinateMap({
                 <Eraser size={16} /> Trail
               </Button>
 
-              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
+              <Toggle
+                checked={showCityLayer}
+                onChange={setShowCityLayer}
+                label={`City links (${cityMarkers.length})`}
+                className="map-primary-city-toggle"
+              />
 
               <Button
                 className={`map-icon-button ${showMapSettings ? 'active' : ''}`}
@@ -1331,6 +1349,7 @@ export default function WrappedCoordinateMap({
 
           {showMapSettings && (
             <div className="map-settings-drawer">
+              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
@@ -1338,6 +1357,26 @@ export default function WrappedCoordinateMap({
               <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
             </div>
           )}
+
+          <div className="map-status-pills">
+            <span className={`map-status-pill ${ocrRunning ? 'status-running' : ocrRunningState == null ? 'status-unknown' : 'status-stopped'}`}>
+              OCR: {ocrStatusLabel}
+            </span>
+            <span className="map-status-pill status-city">
+              City: {latestCityName || 'Unknown'}
+            </span>
+            <span className="map-status-pill status-speed">
+              Speed: {coordinateSpeedLabel} kt
+            </span>
+            {showCityLayer && (
+              <span className="map-status-pill status-city-links">
+                City links: {visibleCityMarkers.length}/{cityMarkers.length}
+              </span>
+            )}
+            <span className="map-status-pill status-mouse-coordinate">
+              Mouse: {mouseCoordinate ? `X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Off map'}
+            </span>
+          </div>
         </div>
 
         <div
@@ -1360,22 +1399,22 @@ export default function WrappedCoordinateMap({
 
           <div className="map-info">
             <strong>Current coordinate</strong>
-            <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
-            <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
-            <span>Speed: {coordinateSpeedLabel} kt</span>
-            <span>{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
-            <span>Trail points: {sessionTrailRaw.length}</span>
-            <span>
+            <span className="map-info-row map-info-ocr">{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
+            <span className="map-info-row map-info-map">{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
+            <span className="map-info-row map-info-speed">Speed: {coordinateSpeedLabel} kt</span>
+            <span className="map-info-row map-info-mouse">{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
+            <span className="map-info-row map-info-trail-count">Trail points: {sessionTrailRaw.length}</span>
+            <span className="map-info-row map-info-trail-mode">
               Trail mode:{' '}
               {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}
             </span>
-            <span>
+            <span className="map-info-row map-info-direction">
               Direction max: {(MAX_SLOPE_WORLD_LENGTH_RATIO * 100).toFixed(0)}% map width
             </span>
-            <span>Zoom {(zoom * 100).toFixed(1)}%</span>
-            {showCityLayer && <span>City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
+            <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
+            {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
             {showCityLayer && hasCityGoodSearch && (
-              <span>Buy good matches: {highlightedBuyCityNames.size}</span>
+              <span className="map-info-row map-info-buy-matches">Buy good matches: {highlightedBuyCityNames.size}</span>
             )}
           </div>
 
