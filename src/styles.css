@@ -3674,6 +3674,12 @@ button.similar-good-chip:hover {
   color: #dbeafe;
 }
 
+.map-status-pill.status-speed {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.16);
+  color: #dcfce7;
+}
+
 .map-status-pill.status-city-links {
   border-color: rgba(250, 204, 21, 0.35);
   background: rgba(250, 204, 21, 0.12);

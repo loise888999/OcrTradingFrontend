@@ -92,6 +92,55 @@ function getPointTimestamp(point) {
   return Number.isFinite(time) ? time : null;
 }
 
+function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
+  if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) return 0;
+
+  const timedPoints = points
+    .map((point) => ({
+      point,
+      time: getPointTimestamp(point)
+    }))
+    .filter((entry) => entry.time != null)
+    .sort((a, b) => a.time - b.time);
+
+  if (timedPoints.length < 2) return 0;
+
+  const latestTime = timedPoints[timedPoints.length - 1].time;
+  const cutoff = latestTime - Math.max(0, Number(windowSeconds) || 0) * 1000;
+  const recent = timedPoints.filter((entry) => entry.time >= cutoff);
+
+  if (recent.length < 2) return 0;
+
+  let totalDistance = 0;
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const previous = recent[i - 1].point;
+    const current = recent[i].point;
+    const previousX = Number(previous.x);
+    const previousY = Number(previous.y);
+    const currentX = Number(current.x);
+    const currentY = Number(current.y);
+
+    if (
+      !Number.isFinite(previousX) ||
+      !Number.isFinite(previousY) ||
+      !Number.isFinite(currentX) ||
+      !Number.isFinite(currentY)
+    ) {
+      continue;
+    }
+
+    const dx = unwrapDx(previousX, currentX, worldWidth);
+    const dy = currentY - previousY;
+
+    totalDistance += Math.hypot(dx, dy);
+  }
+
+  const elapsedSeconds = (recent[recent.length - 1].time - recent[0].time) / 1000;
+
+  return elapsedSeconds > 0 ? totalDistance / elapsedSeconds : 0;
+}
+
 function getPointKey(point, index = 0) {
   const timestamp =
     point?.capturedAtUtc ||
@@ -707,6 +756,11 @@ export default function WrappedCoordinateMap({
   const ocrRunningState = getOcrRunningState(ocrStatus);
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
+  const coordinateSpeed = useMemo(
+    () => calculateCoordinateSpeed(coordinates, worldWidth),
+    [coordinates, worldWidth]
+  );
+  const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
@@ -1168,6 +1222,9 @@ export default function WrappedCoordinateMap({
                 <span className="map-status-pill status-city">
                   City: {latestCityName || 'Unknown'}
                 </span>
+                <span className="map-status-pill status-speed">
+                  Speed: {coordinateSpeedLabel} kt
+                </span>
                 {showCityLayer && (
                   <span className="map-status-pill status-city-links">
                     City links: {visibleCityMarkers.length}/{cityMarkers.length}
@@ -1305,6 +1362,7 @@ export default function WrappedCoordinateMap({
             <strong>Current coordinate</strong>
             <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
             <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
+            <span>Speed: {coordinateSpeedLabel} kt</span>
             <span>{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
             <span>Trail points: {sessionTrailRaw.length}</span>
             <span>
