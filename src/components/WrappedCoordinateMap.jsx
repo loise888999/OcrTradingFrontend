@@ -1245,7 +1245,9 @@ export default function WrappedCoordinateMap({
   return (
     <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
       <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
-        <div className="map-compact-toolbar dark-header compact-header">
+        <div
+          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''}`}
+        >
           <div className="map-toolbar-main-row">
             <div className="map-title-block">
               <h2>
@@ -1287,44 +1289,13 @@ export default function WrappedCoordinateMap({
                 )}
               </div>
 
-              <div className="map-good-search-menu">
-                <Button
-                  className={`map-compact-button map-good-search-menu-button ${showGoodSearchSettings ? 'active' : ''}`}
-                  onClick={() => setShowGoodSearchSettings((value) => !value)}
-                  title="Buy good search"
-                >
-                  Buy good
-                </Button>
-
-                {showGoodSearchSettings && (
-                  <div className="map-good-search-popover">
-                    {showCityLayer && (
-                      <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
-                        <span>Buy good</span>
-                        <input
-                          className="input city-good-filter-input"
-                          value={cityGoodSearch}
-                          onChange={(event) => setCityGoodSearch(event.target.value)}
-                          placeholder="Example: Diamond"
-                          list="map-buy-good-options"
-                        />
-
-                        {cityGoodSearch && (
-                          <button
-                            type="button"
-                            className="city-good-filter-clear"
-                            onClick={() => setCityGoodSearch('')}
-                            aria-label="Clear buy-good search"
-                            title="Clear"
-                          >
-                            Ã—
-                          </button>
-                        )}
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
+              <Button
+                className={`map-compact-button map-good-search-menu-button ${showGoodSearchSettings ? 'active' : ''}`}
+                onClick={() => setShowGoodSearchSettings((value) => !value)}
+                title="Buy good search"
+              >
+                Buy good
+              </Button>
 
               <Button className="map-icon-button" onClick={() => zoomByButton(1 / 1.14)} title="Zoom out">
                 <ZoomOut size={16} />
@@ -1421,6 +1392,35 @@ export default function WrappedCoordinateMap({
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
               <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
+            </div>
+          )}
+
+          {showGoodSearchSettings && (
+            <div className="map-good-search-drawer">
+              {showCityLayer && (
+                <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
+                  <span>Buy good</span>
+                  <input
+                    className="input city-good-filter-input"
+                    value={cityGoodSearch}
+                    onChange={(event) => setCityGoodSearch(event.target.value)}
+                    placeholder="Example: Diamond"
+                    list="map-buy-good-options"
+                  />
+
+                  {cityGoodSearch && (
+                    <button
+                      type="button"
+                      className="city-good-filter-clear"
+                      onClick={() => setCityGoodSearch('')}
+                      aria-label="Clear buy-good search"
+                      title="Clear"
+                    >
+                      Ã—
+                    </button>
+                  )}
+                </label>
+              )}
             </div>
           )}
 
