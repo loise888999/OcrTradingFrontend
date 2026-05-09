@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eraser, Map, MapPin, Maximize2, Minimize2, RefreshCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eraser, Eye, EyeOff, Map, MapPin, Maximize2, Minimize2, RefreshCw, SlidersHorizontal, X, ZoomIn, ZoomOut } from 'lucide-react';
 
 const MAP_IMAGE_URL = '/maps/world-map.png';
 const MAP_PIXEL_WIDTH = 4096;
@@ -27,6 +27,21 @@ function normalizePanX(panX, worldWidth, zoom) {
   if (normalized <= -tilePx) normalized += tilePx;
 
   return normalized;
+}
+
+function clampPanY(panY, worldHeight, zoom, viewportHeight) {
+  const mapPx = worldHeight * zoom;
+  const height = Number(viewportHeight);
+
+  if (!Number.isFinite(mapPx) || mapPx <= 0 || !Number.isFinite(height) || height <= 0) {
+    return panY;
+  }
+
+  if (mapPx <= height) {
+    return (height - mapPx) / 2;
+  }
+
+  return Math.min(0, Math.max(height - mapPx, panY));
 }
 
 function clampY(value, height) {
@@ -90,6 +105,55 @@ function getPointTimestamp(point) {
 
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
+  if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) return 0;
+
+  const timedPoints = points
+    .map((point) => ({
+      point,
+      time: getPointTimestamp(point)
+    }))
+    .filter((entry) => entry.time != null)
+    .sort((a, b) => a.time - b.time);
+
+  if (timedPoints.length < 2) return 0;
+
+  const latestTime = timedPoints[timedPoints.length - 1].time;
+  const cutoff = latestTime - Math.max(0, Number(windowSeconds) || 0) * 1000;
+  const recent = timedPoints.filter((entry) => entry.time >= cutoff);
+
+  if (recent.length < 2) return 0;
+
+  let totalDistance = 0;
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const previous = recent[i - 1].point;
+    const current = recent[i].point;
+    const previousX = Number(previous.x);
+    const previousY = Number(previous.y);
+    const currentX = Number(current.x);
+    const currentY = Number(current.y);
+
+    if (
+      !Number.isFinite(previousX) ||
+      !Number.isFinite(previousY) ||
+      !Number.isFinite(currentX) ||
+      !Number.isFinite(currentY)
+    ) {
+      continue;
+    }
+
+    const dx = unwrapDx(previousX, currentX, worldWidth);
+    const dy = currentY - previousY;
+
+    totalDistance += Math.hypot(dx, dy);
+  }
+
+  const elapsedSeconds = (recent[recent.length - 1].time - recent[0].time) / 1000;
+
+  return elapsedSeconds > 0 ? totalDistance / elapsedSeconds : 0;
 }
 
 function getPointKey(point, index = 0) {
@@ -363,11 +427,11 @@ function Card({ children, className = '' }) {
   return <section className={`card ${className}`}>{children}</section>;
 }
 
-function Toggle({ checked, onChange, label }) {
+function Toggle({ checked, onChange, label, className = '' }) {
   return (
     <button
       type="button"
-      className={`toggle ${checked ? 'toggle-on' : ''}`}
+      className={`toggle ${checked ? 'toggle-on' : ''} ${className}`}
       onClick={() => onChange(!checked)}
     >
       <span className="toggle-switch" />
@@ -557,6 +621,10 @@ export default function WrappedCoordinateMap({
   const [keepCentered, setKeepCentered] = useState(false);
   const [isFullBrowserMap, setIsFullBrowserMap] = useState(false);
   const [showMapSettings, setShowMapSettings] = useState(false);
+  const [showTrailSettings, setShowTrailSettings] = useState(false);
+  const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
+  const [showMapInfo, setShowMapInfo] = useState(true);
+  const [mouseCoordinate, setMouseCoordinate] = useState(null);
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
@@ -593,6 +661,7 @@ export default function WrappedCoordinateMap({
     if (!isFullBrowserMap) return undefined;
 
     document.body.classList.add('map-full-browser-active');
+    setShowGoodSearchSettings(true);
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -706,6 +775,11 @@ export default function WrappedCoordinateMap({
   const ocrRunningState = getOcrRunningState(ocrStatus);
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
+  const coordinateSpeed = useMemo(
+    () => calculateCoordinateSpeed(coordinates, worldWidth),
+    [coordinates, worldWidth]
+  );
+  const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
@@ -813,13 +887,13 @@ export default function WrappedCoordinateMap({
 
       const nextPan = {
         x: normalizePanX(rect.width / 2 - displayCurrent.x * targetZoom, worldWidth, targetZoom),
-        y: rect.height / 2 - displayCurrent.y * targetZoom
+        y: clampPanY(rect.height / 2 - displayCurrent.y * targetZoom, worldHeight, targetZoom, rect.height)
       };
 
       panRef.current = nextPan;
       setPan(nextPan);
     },
-    [displayCurrent, worldWidth]
+    [displayCurrent, worldHeight, worldWidth]
   );
 
   useEffect(() => {
@@ -833,6 +907,16 @@ export default function WrappedCoordinateMap({
         width: rect.width || 1200,
         height: rect.height || 700
       });
+
+      setPan((currentPan) => {
+        const nextPan = {
+          ...currentPan,
+          y: clampPanY(currentPan.y, worldHeight, zoomRef.current, rect.height || 700)
+        };
+
+        panRef.current = nextPan;
+        return nextPan;
+      });
     };
 
     updateSize();
@@ -841,7 +925,7 @@ export default function WrappedCoordinateMap({
     observer.observe(stage);
 
     return () => observer.disconnect();
-  }, []);
+  }, [worldHeight]);
 
   useEffect(() => {
     if (keepCentered) centerOnCurrent();
@@ -872,11 +956,11 @@ export default function WrappedCoordinateMap({
         keepCentered && displayCurrent
           ? {
               x: normalizePanX(rect.width / 2 - displayCurrent.x * nextZoom, worldWidth, nextZoom),
-              y: rect.height / 2 - displayCurrent.y * nextZoom
+              y: clampPanY(rect.height / 2 - displayCurrent.y * nextZoom, worldHeight, nextZoom, rect.height)
             }
           : {
               x: normalizePanX(mouseX - worldMouseX * nextZoom, worldWidth, nextZoom),
-              y: mouseY - worldMouseY * nextZoom
+              y: clampPanY(mouseY - worldMouseY * nextZoom, worldHeight, nextZoom, rect.height)
             };
 
       zoomRef.current = nextZoom;
@@ -889,7 +973,7 @@ export default function WrappedCoordinateMap({
     stage.addEventListener('wheel', handleWheel, { passive: false });
 
     return () => stage.removeEventListener('wheel', handleWheel);
-  }, [keepCentered, displayCurrent, worldWidth]);
+  }, [keepCentered, displayCurrent, worldHeight, worldWidth]);
 
   const onMouseDown = (event) => {
     event.preventDefault();
@@ -904,7 +988,30 @@ export default function WrappedCoordinateMap({
     setLastMouse({ x: event.clientX, y: event.clientY });
   };
 
+  const updateMouseCoordinate = (event) => {
+    const stage = stageRef.current;
+    const currentZoom = zoomRef.current;
+
+    if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) {
+      setMouseCoordinate(null);
+      return;
+    }
+
+    const rect = stage.getBoundingClientRect();
+    const screenX = event.clientX - rect.left;
+    const screenY = event.clientY - rect.top;
+    const worldX = (screenX - panRef.current.x) / currentZoom;
+    const worldY = (screenY - panRef.current.y) / currentZoom;
+
+    setMouseCoordinate({
+      x: Math.round(normalizeX(worldX, worldWidth)),
+      y: Math.round(clampY(worldY, worldHeight))
+    });
+  };
+
   const onMouseMove = (event) => {
+    updateMouseCoordinate(event);
+
     if (!dragging || !lastMouse) return;
 
     if (cityClickRef.current) {
@@ -919,10 +1026,16 @@ export default function WrappedCoordinateMap({
     }
 
     const currentZoom = zoomRef.current;
+    const rect = stageRef.current?.getBoundingClientRect();
 
     const nextPan = {
       x: normalizePanX(panRef.current.x + event.clientX - lastMouse.x, worldWidth, currentZoom),
-      y: panRef.current.y + event.clientY - lastMouse.y
+      y: clampPanY(
+        panRef.current.y + event.clientY - lastMouse.y,
+        worldHeight,
+        currentZoom,
+        rect?.height || viewportSize.height
+      )
     };
 
     setPan(nextPan);
@@ -936,6 +1049,11 @@ export default function WrappedCoordinateMap({
     setDragging(false);
     setLastMouse(null);
     cityClickRef.current = null;
+  };
+
+  const handleMouseLeave = () => {
+    setMouseCoordinate(null);
+    endDrag();
   };
 
   const selectCityFromCleanClick = (event, city) => {
@@ -963,9 +1081,11 @@ export default function WrappedCoordinateMap({
     if (keepCentered) {
       centerOnCurrent(nextZoom);
     } else {
+      const rect = stageRef.current?.getBoundingClientRect();
       const nextPan = {
         ...panRef.current,
-        x: normalizePanX(panRef.current.x, worldWidth, nextZoom)
+        x: normalizePanX(panRef.current.x, worldWidth, nextZoom),
+        y: clampPanY(panRef.current.y, worldHeight, nextZoom, rect?.height || viewportSize.height)
       };
 
       setPan(nextPan);
@@ -1125,29 +1245,58 @@ export default function WrappedCoordinateMap({
   return (
     <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
       <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
-        <div className="map-compact-toolbar dark-header compact-header">
+        <div
+          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''}`}
+        >
           <div className="map-toolbar-main-row">
             <div className="map-title-block">
               <h2>
                 <Map size={20} /> Full Window Wrapped Map
               </h2>
-
-              <div className="map-status-pills">
-                <span className={`map-status-pill ${ocrRunning ? 'status-running' : ocrRunningState == null ? 'status-unknown' : 'status-stopped'}`}>
-                  OCR: {ocrStatusLabel}
-                </span>
-                <span className="map-status-pill status-city">
-                  City: {latestCityName || 'Unknown'}
-                </span>
-                {showCityLayer && (
-                  <span className="map-status-pill status-city-links">
-                    City links: {visibleCityMarkers.length}/{cityMarkers.length}
-                  </span>
-                )}
-              </div>
             </div>
 
             <div className="map-toolbar-actions">
+              <div className="map-trail-menu">
+                <Button
+                  className={`map-compact-button map-trail-menu-button ${showTrailSettings ? 'active' : ''}`}
+                  onClick={() => setShowTrailSettings((value) => !value)}
+                  title="Trail settings"
+                >
+                  <Eraser size={16} /> Trail
+                </Button>
+
+                {showTrailSettings && (
+                  <div className="map-trail-settings-popover">
+                    <label className="map-toolbar-select-field" title="Trail duration">
+                      <span>Trail</span>
+                      <select
+                        className="input"
+                        value={trailWindow}
+                        onChange={(event) => setTrailWindow(event.target.value)}
+                      >
+                        <option value="30m">30 min</option>
+                        <option value="2h">2 hours</option>
+                        <option value="session">Session</option>
+                      </select>
+                    </label>
+
+                    <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
+
+                    <Button className="map-compact-button" onClick={eraseTrail} disabled={!current}>
+                      <Eraser size={16} /> Clear
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                className={`map-compact-button map-good-search-menu-button ${showGoodSearchSettings ? 'active' : ''}`}
+                onClick={() => setShowGoodSearchSettings((value) => !value)}
+                title="Buy good search"
+              >
+                Buy good
+              </Button>
+
               <Button className="map-icon-button" onClick={() => zoomByButton(1 / 1.14)} title="Zoom out">
                 <ZoomOut size={16} />
               </Button>
@@ -1160,11 +1309,20 @@ export default function WrappedCoordinateMap({
                 Center
               </Button>
 
-              <Button className="map-compact-button" onClick={eraseTrail} disabled={!current}>
-                <Eraser size={16} /> Trail
+              <Button
+                className={`map-icon-button ${showMapInfo ? 'active' : ''}`}
+                onClick={() => setShowMapInfo((value) => !value)}
+                title={showMapInfo ? 'Hide current coordinate box' : 'Show current coordinate box'}
+              >
+                {showMapInfo ? <Eye size={16} /> : <EyeOff size={16} />}
               </Button>
 
-              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
+              <Toggle
+                checked={showCityLayer}
+                onChange={setShowCityLayer}
+                label={`City links (${cityMarkers.length})`}
+                className="map-primary-city-toggle"
+              />
 
               <Button
                 className={`map-icon-button ${showMapSettings ? 'active' : ''}`}
@@ -1189,19 +1347,6 @@ export default function WrappedCoordinateMap({
           </div>
 
           <div className="map-toolbar-quick-row">
-            <label className="map-toolbar-select-field" title="Trail duration">
-              <span>Trail</span>
-              <select
-                className="input"
-                value={trailWindow}
-                onChange={(event) => setTrailWindow(event.target.value)}
-              >
-                <option value="30m">30 min</option>
-                <option value="2h">2 hours</option>
-                <option value="session">Session</option>
-              </select>
-            </label>
-
             {showCityLayer && (
               <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
                 <span>Buy good</span>
@@ -1242,13 +1387,62 @@ export default function WrappedCoordinateMap({
 
           {showMapSettings && (
             <div className="map-settings-drawer">
+              <Toggle checked={showCityLayer} onChange={setShowCityLayer} label={`City links (${cityMarkers.length})`} />
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
-              <Toggle checked={showTrailLayer} onChange={setShowTrailLayer} label="Path trail" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
               <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
             </div>
           )}
+
+          {showGoodSearchSettings && (
+            <div className="map-good-search-drawer">
+              {showCityLayer && (
+                <label className="city-good-filter-field" title="Highlight cities where this good can be bought">
+                  <span>Buy good</span>
+                  <input
+                    className="input city-good-filter-input"
+                    value={cityGoodSearch}
+                    onChange={(event) => setCityGoodSearch(event.target.value)}
+                    placeholder="Example: Diamond"
+                    list="map-buy-good-options"
+                  />
+
+                  {cityGoodSearch && (
+                    <button
+                      type="button"
+                      className="city-good-filter-clear"
+                      onClick={() => setCityGoodSearch('')}
+                      aria-label="Clear buy-good search"
+                      title="Clear"
+                    >
+                      Ã—
+                    </button>
+                  )}
+                </label>
+              )}
+            </div>
+          )}
+
+          <div className="map-status-pills">
+            <span className={`map-status-pill ${ocrRunning ? 'status-running' : ocrRunningState == null ? 'status-unknown' : 'status-stopped'}`}>
+              OCR: {ocrStatusLabel}
+            </span>
+            <span className="map-status-pill status-city">
+              City: {latestCityName || 'Unknown'}
+            </span>
+            <span className="map-status-pill status-speed">
+              Speed: {coordinateSpeedLabel} kt
+            </span>
+            {showCityLayer && (
+              <span className="map-status-pill status-city-links">
+                City links: {visibleCityMarkers.length}/{cityMarkers.length}
+              </span>
+            )}
+            <span className="map-status-pill status-mouse-coordinate">
+              Mouse: {mouseCoordinate ? `X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Off map'}
+            </span>
+          </div>
         </div>
 
         <div
@@ -1257,7 +1451,7 @@ export default function WrappedCoordinateMap({
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseUp={endDrag}
-          onMouseLeave={endDrag}
+          onMouseLeave={handleMouseLeave}
         >
           <svg className="map-svg">
             <rect width="100%" height="100%" className="map-bg" />
@@ -1269,24 +1463,28 @@ export default function WrappedCoordinateMap({
             </g>
           </svg>
 
+          {showMapInfo && (
           <div className="map-info">
             <strong>Current coordinate</strong>
-            <span>{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
-            <span>{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
-            <span>Trail points: {sessionTrailRaw.length}</span>
-            <span>
+            <span className="map-info-row map-info-ocr">{current ? `OCR X ${current.x} / Y ${current.y}` : 'No coordinate yet'}</span>
+            <span className="map-info-row map-info-map">{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
+            <span className="map-info-row map-info-speed">Speed: {coordinateSpeedLabel} kt</span>
+            <span className="map-info-row map-info-mouse">{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
+            <span className="map-info-row map-info-trail-count">Trail points: {sessionTrailRaw.length}</span>
+            <span className="map-info-row map-info-trail-mode">
               Trail mode:{' '}
               {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}
             </span>
-            <span>
+            <span className="map-info-row map-info-direction">
               Direction max: {(MAX_SLOPE_WORLD_LENGTH_RATIO * 100).toFixed(0)}% map width
             </span>
-            <span>Zoom {(zoom * 100).toFixed(1)}%</span>
-            {showCityLayer && <span>City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
+            <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
+            {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
             {showCityLayer && hasCityGoodSearch && (
-              <span>Buy good matches: {highlightedBuyCityNames.size}</span>
+              <span className="map-info-row map-info-buy-matches">Buy good matches: {highlightedBuyCityNames.size}</span>
             )}
           </div>
+          )}
 
           {showCityLayer && selectedCity && (
             <SelectedCityPanel

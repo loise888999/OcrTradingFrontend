@@ -509,6 +509,22 @@ tr:last-child td {
   white-space: nowrap;
 }
 
+.price-history-summary,
+.price-history-load-more {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.price-history-load-more {
+  justify-content: center;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -3612,6 +3628,8 @@ button.similar-good-chip:hover {
 
 .map-toolbar-main-row,
 .map-toolbar-quick-row,
+.map-trail-settings-popover,
+.map-good-search-drawer,
 .map-settings-drawer {
   display: flex;
   align-items: center;
@@ -3621,6 +3639,36 @@ button.similar-good-chip:hover {
 
 .map-toolbar-main-row {
   justify-content: space-between;
+}
+
+.map-trail-menu {
+  position: relative;
+  width: fit-content;
+}
+
+.map-trail-menu-button.active,
+.map-good-search-menu-button.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.map-trail-settings-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 24px));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  padding: 8px;
+  background: rgba(2, 6, 23, 0.92);
+  box-shadow: 0 18px 45px rgba(2, 6, 23, 0.35);
+}
+
+.map-toolbar-actions .map-trail-settings-popover {
+  right: 0;
+  left: auto;
 }
 
 .map-title-block {
@@ -3674,10 +3722,22 @@ button.similar-good-chip:hover {
   color: #dbeafe;
 }
 
+.map-status-pill.status-speed {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.16);
+  color: #dcfce7;
+}
+
 .map-status-pill.status-city-links {
   border-color: rgba(250, 204, 21, 0.35);
   background: rgba(250, 204, 21, 0.12);
   color: #fef9c3;
+}
+
+.map-status-pill.status-mouse-coordinate {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: rgba(20, 184, 166, 0.14);
+  color: #ccfbf1;
 }
 
 .map-toolbar-actions {
@@ -4507,4 +4567,328 @@ button.similar-good-chip:hover {
 .map-status-pill.status-unknown {
   background: rgba(148, 163, 184, 0.18);
   color: #e2e8f0;
+}
+
+/* Coordinate Map v8: tiny fullscreen windows keep map visible and controls compact */
+.map-full-browser-card {
+  position: relative;
+  display: block;
+  min-height: 0;
+}
+
+.map-full-browser-card .fullscreen-map-stage,
+.map-full-browser-card .map-stage-full-browser {
+  height: 100%;
+  min-height: 0;
+}
+
+.map-full-browser-card .map-compact-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-height: 46vh;
+  overflow: visible;
+  background: transparent;
+  background-color: transparent;
+  backdrop-filter: none;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.85);
+}
+
+.map-full-browser-card .map-toolbar-main-row {
+  display: contents;
+}
+
+.map-full-browser-card .map-trail-menu {
+  order: 1;
+}
+
+.map-full-browser-card .map-title-block {
+  display: none;
+}
+
+.map-full-browser-card .map-toolbar-quick-row {
+  display: none;
+  order: 2;
+}
+
+.map-full-browser-card .map-toolbar-actions {
+  order: 3;
+  margin-left: auto;
+}
+
+.map-full-browser-card .map-settings-drawer {
+  order: 5;
+  width: 100%;
+}
+
+.map-full-browser-card .map-status-pills {
+  order: 2;
+  flex: 1 1 360px;
+  min-width: min(360px, 100%);
+  width: auto;
+}
+
+.map-full-browser-card .map-compact-toolbar.map-settings-open .map-status-pills {
+  order: 4;
+  flex-basis: 100%;
+  width: 100%;
+}
+
+.map-full-browser-card .map-status-pill,
+.map-full-browser-card .toggle,
+.map-full-browser-card .map-toolbar-select-field,
+.map-full-browser-card .city-good-filter-field,
+.map-full-browser-card .map-filter-summary {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.76);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.38);
+  color: #f8fafc;
+}
+
+.map-full-browser-card .map-trail-settings-popover,
+.map-full-browser-card .map-good-search-drawer {
+  border-color: rgba(255, 255, 255, 0.32);
+  border-radius: 16px;
+  padding: 8px;
+}
+
+.map-full-browser-card .map-good-search-drawer {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  z-index: 24;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.map-full-browser-card .map-good-search-drawer .city-good-filter-field {
+  background: rgba(2, 6, 23, 0.58);
+}
+
+.map-full-browser-card .map-icon-button,
+.map-full-browser-card .map-compact-button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.35);
+  color: #020617;
+}
+
+.map-full-browser-card .map-icon-button.active {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(219, 234, 254, 0.95);
+  color: #1d4ed8;
+}
+
+.map-full-browser-card .map-title-block h2 {
+  display: none;
+}
+
+.map-full-browser-card .map-title-block,
+.map-full-browser-card .map-toolbar-actions,
+.map-full-browser-card .map-toolbar-quick-row,
+.map-full-browser-card .map-settings-drawer {
+  min-width: 0;
+}
+
+@media (max-width: 900px), (max-height: 650px) {
+  .map-full-browser-card .map-status-pill.status-city-links,
+  .map-full-browser-card .map-status-pill.status-mouse-coordinate,
+  .map-full-browser-card .map-primary-city-toggle,
+  .map-full-browser-card .map-toolbar-quick-row {
+    display: none;
+  }
+
+}
+
+@media (max-width: 560px), (max-height: 520px) {
+  .map-full-browser-card .map-compact-toolbar {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .map-full-browser-card .map-toolbar-actions {
+    gap: 4px;
+  }
+
+  .map-full-browser-card .map-icon-button,
+  .map-full-browser-card .map-compact-button {
+    min-height: 30px;
+    min-width: 32px;
+    padding: 6px 8px;
+  }
+
+  .map-full-browser-card .toggle {
+    padding: 5px 8px 5px 6px;
+    font-size: 12px;
+  }
+
+  .map-full-browser-card .map-info {
+    left: 8px;
+    bottom: 8px;
+    max-width: min(260px, calc(100% - 16px));
+    max-height: 42%;
+    overflow: auto;
+    padding: 10px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 420px), (max-height: 420px) {
+  .map-full-browser-card .map-info {
+    display: none;
+  }
+}
+
+@media (max-width: 780px), (max-height: 620px) {
+  .map-full-browser-card .map-info {
+    gap: 3px;
+    padding: 10px;
+    font-size: 12px;
+  }
+
+  .map-full-browser-card .map-info-direction,
+  .map-full-browser-card .map-info-trail-mode,
+  .map-full-browser-card .map-info-city-links {
+    display: none;
+  }
+}
+
+@media (max-width: 620px), (max-height: 520px) {
+  .map-full-browser-card .map-info {
+    max-width: min(230px, calc(100% - 16px));
+    padding: 8px;
+    font-size: 11px;
+  }
+
+  .map-full-browser-card .map-info-trail-count,
+  .map-full-browser-card .map-info-zoom,
+  .map-full-browser-card .map-info-buy-matches {
+    display: none;
+  }
+}
+
+@media (max-width: 500px), (max-height: 460px) {
+  .map-full-browser-card .map-info strong,
+  .map-full-browser-card .map-info-map,
+  .map-full-browser-card .map-info-mouse {
+    display: none;
+  }
+}
+
+/* Coordinate Map v9: embedded map uses screen space like fullscreen */
+.coordinate-map-shell:not(.map-full-browser-shell) .coordinate-map-card {
+  position: relative;
+  display: block;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .fullscreen-map-stage {
+  height: calc(100vh - 150px);
+  min-height: 620px;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-height: 42vh;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+  background-color: transparent;
+  text-shadow: 0 2px 8px rgba(2, 6, 23, 0.85);
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-main-row {
+  display: contents;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-title-block {
+  display: none;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-quick-row {
+  display: none;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-actions {
+  order: 3;
+  margin-left: auto;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-settings-drawer {
+  order: 5;
+  width: 100%;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-status-pills {
+  order: 2;
+  flex: 1 1 360px;
+  min-width: min(360px, 100%);
+  width: auto;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar.map-settings-open .map-status-pills {
+  order: 4;
+  flex-basis: 100%;
+  width: 100%;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-status-pill,
+.coordinate-map-shell:not(.map-full-browser-shell) .toggle,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-toolbar-select-field,
+.coordinate-map-shell:not(.map-full-browser-shell) .city-good-filter-field,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-filter-summary {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(2, 6, 23, 0.76);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.38);
+  color: #f8fafc;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-icon-button,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-button {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(248, 250, 252, 0.92);
+  box-shadow: 0 8px 22px rgba(2, 6, 23, 0.35);
+  color: #020617;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-icon-button.active,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-button.active {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(219, 234, 254, 0.95);
+  color: #1d4ed8;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-trail-settings-popover,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-drawer {
+  border-color: rgba(255, 255, 255, 0.32);
+  border-radius: 16px;
+  padding: 8px;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-drawer {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  z-index: 24;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-drawer .city-good-filter-field {
+  background: rgba(2, 6, 23, 0.58);
 }
