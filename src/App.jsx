@@ -33,6 +33,7 @@ const MAP_IMAGE_URL = '/maps/world-map.png';
 const PRICE_HISTORY_INITIAL_VISIBLE = 20;
 const PRICE_HISTORY_LOAD_STEP = 20;
 const PRICE_HISTORY_MAX_VISIBLE = 500;
+const PRICE_REFRESH_INTERVAL_MS = 10 * 1000;
 
 function sanitizeCityName(value) {
   if (!value) return '';
@@ -840,8 +841,15 @@ export default function App() {
 
   const refreshPrices = useCallback(async () => {
     const data = await run(
-      () => api.getPriceHistory({ take: 500 }),
-      'Could not load prices'
+      async () => {
+        try {
+          return await api.getLatestCityGoods({ take: 50000 });
+        } catch {
+          // Allows the frontend to still run if the backend has not been updated yet.
+          return api.getPriceHistory({ take: 2000 });
+        }
+      },
+      'Could not load latest city goods'
     );
 
     if (data) setPrices(data);
@@ -890,10 +898,17 @@ export default function App() {
   useEffect(() => {
     refreshAll();
 
+    let lastPriceRefreshAt = 0;
+
     const timer = setInterval(() => {
       refreshStatus();
       refreshCoordinates();
-      refreshPrices();
+
+      const now = Date.now();
+      if (now - lastPriceRefreshAt >= PRICE_REFRESH_INTERVAL_MS) {
+        lastPriceRefreshAt = now;
+        refreshPrices();
+      }
     }, Math.max(1, settings.ocrInterval) * 1000);
 
     return () => clearInterval(timer);

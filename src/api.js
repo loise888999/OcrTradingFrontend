@@ -193,6 +193,8 @@ export const api = {
 
   getLatestCity: () => request('/api/cities/latest'),
 
+  getLatestCityGoods: ({ city = '', tradeType = '', take = 50000 } = {}) =>
+    request(withQuery('/api/trading/latest-city-goods', { city, tradeType, take })),
   getPriceHistory: ({ city = '', item = '', tradeType = '', take = 250 } = {}) =>
     request(withQuery('/api/prices/history', { city, item, tradeType, take })),
 
