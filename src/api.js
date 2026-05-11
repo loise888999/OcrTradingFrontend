@@ -143,6 +143,37 @@ export const api = {
       body: JSON.stringify(setting)
     }),
 
+  getCoordinateOcrSettings: () =>
+    request('/api/settings/coordinate-ocr'),
+
+  updateCoordinateOcrSettings: (payload) =>
+    request('/api/settings/coordinate-ocr', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  getCoordinateOcrStatus: () =>
+    request('/api/settings/coordinate-ocr/status'),
+
+  getCoordinateTemplateProfileStatus: () =>
+    request('/api/coordinate-template/profile/status'),
+
+  createCoordinateTemplateProfile: (payload) =>
+    request('/api/coordinate-template/profile', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  startCoordinateTemplateAutoProfile: () =>
+    request('/api/coordinate-template/profile/auto/start', {
+      method: 'POST'
+    }),
+
+  stopCoordinateTemplateAutoProfile: () =>
+    request('/api/coordinate-template/profile/auto/stop', {
+      method: 'POST'
+    }),
+
   // OCR controls
   startOcr: () =>
     request('/api/ocr/start', {

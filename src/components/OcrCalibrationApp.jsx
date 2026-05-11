@@ -556,9 +556,10 @@ function GameWindowStatus({ gameWindow, gameWindowError, captureSize, captureUrl
 
 export default function OcrCalibrationApp() {
   const stageRef = useRef(null);
+  const initialSelection = new URLSearchParams(window.location.search).get('box') || 'city';
 
   const [layout, setLayout] = useState(createDefaultLayout());
-  const [selection, setSelection] = useState('city');
+  const [selection, setSelection] = useState(initialSelection);
   const [captureUrl, setCaptureUrl] = useState('');
   const [captureSize, setCaptureSize] = useState({ width: 0, height: 0 });
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });

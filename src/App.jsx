@@ -17,6 +17,7 @@ import OcrQuickControls from './components/OcrQuickControls.jsx';
 import TradingTab from './components/TradingTab.jsx';
 import SortableTable from './components/SortableTable.jsx';
 import WrappedCoordinateMap from './components/WrappedCoordinateMap.jsx';
+import CoordinateOcrSettingsPanel from './components/CoordinateOcrSettingsPanel.jsx';
 import DataSharingPanel from './components/DataSharingPanel.jsx';
 import MapEditorPanel from './components/MapEditorPanel.jsx';
 
@@ -575,6 +576,8 @@ function SettingsTab({
   refreshCatalogs,
   cities
 }) {
+  const [settingsSubtab, setSettingsSubtab] = useState('general');
+
   const saveMapSetting = async (key, value) => {
     setSettings((current) => ({
       ...current,
@@ -611,6 +614,33 @@ function SettingsTab({
         </div>
       </Card>
 
+      <div className="settings-subtabs">
+        <button
+          type="button"
+          className={settingsSubtab === 'general' ? 'active' : ''}
+          onClick={() => setSettingsSubtab('general')}
+        >
+          <Settings size={16} /> General
+        </button>
+        <button
+          type="button"
+          className={settingsSubtab === 'coordinate-ocr' ? 'active' : ''}
+          onClick={() => setSettingsSubtab('coordinate-ocr')}
+        >
+          <Crosshair size={16} /> Coordinate OCR
+        </button>
+      </div>
+
+      {settingsSubtab === 'coordinate-ocr' && (
+        <Card>
+          <div className="card-body">
+            <CoordinateOcrSettingsPanel run={run} />
+          </div>
+        </Card>
+      )}
+
+      {settingsSubtab === 'general' && (
+        <>
       <Card>
         <div className="card-body">
           <GameWindowPanel run={run} />
@@ -741,6 +771,8 @@ function SettingsTab({
           </div>
         </Card>
       </div>
+        </>
+      )}
 
     </div>
   );

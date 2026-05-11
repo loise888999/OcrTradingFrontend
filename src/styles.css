@@ -762,6 +762,227 @@ tr:last-child td {
   gap: 16px;
 }
 
+.settings-subtabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-subtabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.settings-subtabs button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.coordinate-ocr-settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.coordinate-ocr-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.coordinate-ocr-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+
+.coordinate-ocr-header p {
+  margin: 0;
+}
+
+.coordinate-ocr-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.coordinate-ocr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-weight: 900;
+}
+
+.coordinate-ocr-pill.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.coordinate-ocr-pill.warn {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.coordinate-ocr-message {
+  border-left: 3px solid #f59e0b;
+  padding: 9px 11px;
+  background: #fffbeb;
+  color: #92400e;
+  font-weight: 800;
+}
+
+.coordinate-ocr-mode-grid,
+.coordinate-ocr-options-grid,
+.coordinate-ocr-number-grid,
+.coordinate-ocr-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.coordinate-ocr-calibration-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.coordinate-ocr-calibration-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coordinate-ocr-calibration-header h4 {
+  margin: 0 0 4px;
+}
+
+.coordinate-ocr-calibration-header p {
+  margin: 0;
+}
+
+.coordinate-ocr-calibration-grid {
+  align-items: end;
+}
+
+.coordinate-ocr-profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.coordinate-ocr-auto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.coordinate-ocr-digit-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coordinate-ocr-digit-progress span {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-weight: 950;
+}
+
+.coordinate-ocr-digit-progress span.learned {
+  border-color: #22c55e;
+  background: #dcfce7;
+  color: #166534;
+}
+
+.coordinate-ocr-digit-progress span.validated {
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
+
+.coordinate-ocr-digit-progress span.just-learned {
+  box-shadow: inset 0 0 0 2px #0f766e;
+}
+
+.coordinate-ocr-digit-progress span.rejected {
+  border-color: #ef4444;
+  background: #fee2e2;
+  color: #991b1b;
+  box-shadow: inset 0 0 0 2px #ef4444;
+}
+
+.coordinate-ocr-mode-card {
+  display: grid;
+  gap: 5px;
+  min-height: 96px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 13px;
+  background: #ffffff;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.coordinate-ocr-mode-card:hover:not(:disabled),
+.coordinate-ocr-mode-card.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.coordinate-ocr-mode-card strong {
+  font-size: 1rem;
+}
+
+.coordinate-ocr-mode-card span,
+.coordinate-ocr-option span {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.coordinate-ocr-option {
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: #ffffff;
+}
+
+.coordinate-ocr-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .zone-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1625,6 +1846,10 @@ tr:last-child td {
   .settings-grid,
   .zone-cards,
   .filter-grid,
+  .coordinate-ocr-mode-grid,
+  .coordinate-ocr-options-grid,
+  .coordinate-ocr-number-grid,
+  .coordinate-ocr-calibration-grid,
   .compact-filter-grid,
   .deal-filter-grid,
   .region-panels {
@@ -1638,6 +1863,8 @@ tr:last-child td {
   .hero,
   .status-bar,
   .tab-header,
+  .coordinate-ocr-header,
+  .coordinate-ocr-calibration-header,
   .card-header,
   .simple-deal-header,
   .find-good-header,
