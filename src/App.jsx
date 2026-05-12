@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -34,6 +34,9 @@ const PRICE_HISTORY_INITIAL_VISIBLE = 20;
 const PRICE_HISTORY_LOAD_STEP = 20;
 const PRICE_HISTORY_MAX_VISIBLE = 500;
 const PRICE_REFRESH_INTERVAL_MS = 10 * 1000;
+const COORDINATE_STREAM_HISTORY = 30;
+const MAX_REALTIME_COORDINATES = 1000;
+const COORDINATE_STREAM_STALE_MS = 5 * 1000;
 
 function sanitizeCityName(value) {
   if (!value) return '';
@@ -86,6 +89,91 @@ function getPriceRowCapturedTime(row) {
   const value = row?.capturedAtUtc ?? row?.CapturedAtUtc ?? row?.createdAtUtc ?? row?.CreatedAtUtc;
   const time = value ? new Date(value).getTime() : 0;
   return Number.isFinite(time) ? time : 0;
+}
+function getCoordinateRowTime(row) {
+  const value = row?.capturedAtUtc ?? row?.CapturedAtUtc ?? row?.createdAtUtc ?? row?.CreatedAtUtc ?? row?.timeUtc ?? row?.timestamp;
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function getCoordinateRowKey(row) {
+  const id = row?.id ?? row?.Id;
+  if (id !== undefined && id !== null && Number(id) !== 0) {
+    return `id:${id}`;
+  }
+
+  const time =
+    row?.capturedAtUtc ??
+    row?.CapturedAtUtc ??
+    row?.createdAtUtc ??
+    row?.CreatedAtUtc ??
+    row?.timeUtc ??
+    row?.timestamp ??
+    '';
+
+  return `point:${row?.x ?? row?.X}:${row?.y ?? row?.Y}:${time}:${row?.rawText ?? row?.RawText ?? ''}`;
+}
+
+function normalizeCoordinateRow(row) {
+  if (!row) return null;
+
+  const x = Number(row.x ?? row.X);
+  const y = Number(row.y ?? row.Y);
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+
+  return {
+    ...row,
+    x,
+    y,
+    rawText: row.rawText ?? row.RawText ?? '',
+    capturedAtUtc:
+      row.capturedAtUtc ??
+      row.CapturedAtUtc ??
+      row.createdAtUtc ??
+      row.CreatedAtUtc ??
+      row.timeUtc ??
+      row.timestamp ??
+      new Date().toISOString()
+  };
+}
+
+function getCoordinatePayloadRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+
+  if (Array.isArray(payload.coordinates)) return payload.coordinates;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.data)) return payload.data;
+
+  return [payload];
+}
+
+function appendCoordinateRows(currentRows, incomingRows, maxRows = MAX_REALTIME_COORDINATES) {
+  const merged = new globalThis.Map();
+
+  for (const row of currentRows || []) {
+    const normalized = normalizeCoordinateRow(row);
+    if (normalized) {
+      merged.set(getCoordinateRowKey(normalized), normalized);
+    }
+  }
+
+  const incoming = getCoordinatePayloadRows(incomingRows);
+
+  for (const row of incoming) {
+    const normalized = normalizeCoordinateRow(row);
+    if (normalized) {
+      merged.set(getCoordinateRowKey(normalized), normalized);
+    }
+  }
+
+  return [...merged.values()]
+    .sort((left, right) => getCoordinateRowTime(left) - getCoordinateRowTime(right))
+    .slice(-maxRows);
 }
 
 function getLatestPriceRowsByCityGood(rows) {
@@ -790,6 +878,10 @@ export default function App() {
   const [cities, setCities] = useState([]);
   const [tradeGoods, setTradeGoods] = useState([]);
   const [error, setError] = useState('');
+  const [coordinateStreamStatus, setCoordinateStreamStatus] = useState('connecting');
+  const coordinateStreamConnectedRef = useRef(false);
+  const coordinateFallbackRefreshStartedRef = useRef(false);
+  const lastCoordinateUpdateAtRef = useRef(0);
 
   const [settings, setSettings] = useState({
     worldWidth: DEFAULT_WORLD_WIDTH,
@@ -832,12 +924,80 @@ export default function App() {
 
   const refreshCoordinates = useCallback(async () => {
     const data = await run(
-      () => api.getLatestCoordinates({ take: 20 }),
+      () => api.getLatestCoordinates({ take: COORDINATE_STREAM_HISTORY }),
       'Could not load coordinates'
     );
 
-    if (data) setCoordinates(data);
+    const rows = getCoordinatePayloadRows(data);
+
+    if (rows.length) {
+      lastCoordinateUpdateAtRef.current = Date.now();
+      setCoordinates((current) =>
+        appendCoordinateRows(current, rows, MAX_REALTIME_COORDINATES)
+      );
+    }
   }, [run]);
+  useEffect(() => {
+    let source = null;
+    let closed = false;
+
+    coordinateStreamConnectedRef.current = false;
+    coordinateFallbackRefreshStartedRef.current = false;
+    setCoordinateStreamStatus('connecting');
+
+    const startFallbackPolling = () => {
+      if (closed) return;
+
+      coordinateStreamConnectedRef.current = false;
+      setCoordinateStreamStatus('fallback polling');
+
+      if (!coordinateFallbackRefreshStartedRef.current) {
+        coordinateFallbackRefreshStartedRef.current = true;
+        refreshCoordinates();
+      }
+    };
+
+    const openCoordinateStream = async () => {
+      const nextSource = await api.streamCoordinates({
+        history: COORDINATE_STREAM_HISTORY,
+        onOpen: () => {
+          if (closed) return;
+
+          coordinateStreamConnectedRef.current = true;
+          coordinateFallbackRefreshStartedRef.current = false;
+          setCoordinateStreamStatus('connected');
+        },
+        onError: startFallbackPolling,
+        onCoordinate: (point) => {
+          if (closed) return;
+
+          lastCoordinateUpdateAtRef.current = Date.now();
+          setCoordinates((current) =>
+            appendCoordinateRows(current, point, MAX_REALTIME_COORDINATES)
+          );
+        }
+      });
+
+      if (closed) {
+        nextSource?.close();
+        return;
+      }
+
+      source = nextSource;
+
+      if (!source) {
+        startFallbackPolling();
+      }
+    };
+
+    openCoordinateStream();
+
+    return () => {
+      closed = true;
+      coordinateStreamConnectedRef.current = false;
+      source?.close();
+    };
+  }, [refreshCoordinates]);
 
   const refreshPrices = useCallback(async () => {
     const data = await run(
@@ -988,6 +1148,7 @@ export default function App() {
         {activeTab === 'map' && (
           <WrappedCoordinateMap
             coordinates={coordinates}
+            coordinateStreamStatus={coordinateStreamStatus}
             cities={cities}
             prices={prices}
             ocrStatus={ocrStatus}

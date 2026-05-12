@@ -107,6 +107,46 @@ function getPointTimestamp(point) {
   return Number.isFinite(time) ? time : null;
 }
 
+function getPointId(point) {
+  const id = Number(point?.id ?? point?.Id ?? 0);
+  return Number.isFinite(id) ? id : 0;
+}
+
+function compareCoordinatePoints(left, right) {
+  const leftTime = getPointTimestamp(left) ?? 0;
+  const rightTime = getPointTimestamp(right) ?? 0;
+
+  if (leftTime !== rightTime) return leftTime - rightTime;
+
+  return getPointId(left) - getPointId(right);
+}
+
+function getLatestCoordinate(points) {
+  if (!points?.length) return null;
+
+  return points.reduce((latest, point) =>
+    compareCoordinatePoints(latest, point) <= 0 ? point : latest
+  );
+}
+
+function getDistinctMovingCoordinates(points) {
+  const distinct = [];
+
+  for (const point of points || []) {
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    const previous = distinct[distinct.length - 1];
+    if (previous && Number(previous.x) === x && Number(previous.y) === y) continue;
+
+    distinct.push(point);
+  }
+
+  return distinct;
+}
+
 function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
   if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) return 0;
 
@@ -217,107 +257,64 @@ function splitWrappedSegments(points, worldWidth) {
   return segments.filter((segment) => segment.length >= 2);
 }
 
-function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
-  if (points.length < 2) return null;
+function buildSlopeLine(points, worldWidth, worldHeight, sampleCount) {
+  if (!points || points.length < 2) return null;
 
-  const recent = points.slice(-Math.max(2, sampleCount));
+  const recent = points.slice(-clampMapSlopePointCount(sampleCount));
+  const latestPoint = recent[recent.length - 1];
+  const latestX = Number(latestPoint?.x);
+  const latestY = Number(latestPoint?.y);
 
-  let currentX = Number(recent[0].x);
-  const unwrapped = [{ ...recent[0], unwrappedX: currentX, t: 0 }];
+  if (!Number.isFinite(latestX) || !Number.isFinite(latestY)) return null;
 
-  for (let i = 1; i < recent.length; i += 1) {
-    currentX += unwrapDx(Number(recent[i - 1].x), Number(recent[i].x), worldWidth);
-    unwrapped.push({ ...recent[i], unwrappedX: currentX, t: i });
+  let totalDx = 0;
+  let totalDy = 0;
+  let segmentCount = 0;
+
+  for (let index = 1; index < recent.length; index += 1) {
+    const previous = recent[index - 1];
+    const current = recent[index];
+    const previousX = Number(previous?.x);
+    const previousY = Number(previous?.y);
+    const currentX = Number(current?.x);
+    const currentY = Number(current?.y);
+
+    if (
+      !Number.isFinite(previousX) ||
+      !Number.isFinite(previousY) ||
+      !Number.isFinite(currentX) ||
+      !Number.isFinite(currentY)
+    ) {
+      continue;
+    }
+
+    totalDx += unwrapDx(previousX, currentX, worldWidth);
+    totalDy += currentY - previousY;
+    segmentCount += 1;
   }
 
-  const n = unwrapped.length;
-  const meanT = unwrapped.reduce((sum, point) => sum + point.t, 0) / n;
-  const meanX = unwrapped.reduce((sum, point) => sum + point.unwrappedX, 0) / n;
-  const meanY = unwrapped.reduce((sum, point) => sum + Number(point.y), 0) / n;
+  if (segmentCount === 0) return null;
 
-  let denominator = 0;
-  let numeratorX = 0;
-  let numeratorY = 0;
+  const velocityXPerStep = totalDx / segmentCount;
+  const velocityYPerStep = totalDy / segmentCount;
+  const speedPerStep = Math.hypot(velocityXPerStep, velocityYPerStep);
 
-  for (const point of unwrapped) {
-    const dt = point.t - meanT;
+  if (!Number.isFinite(speedPerStep) || speedPerStep < 0.05) return null;
 
-    denominator += dt * dt;
-    numeratorX += dt * (point.unwrappedX - meanX);
-    numeratorY += dt * (Number(point.y) - meanY);
-  }
+  const slopeLength = worldWidth * MAX_SLOPE_WORLD_LENGTH_RATIO;
+  const scale = slopeLength / speedPerStep;
 
-  if (denominator === 0) return null;
-
-  const dxPerStep = numeratorX / denominator;
-  const dyPerStep = numeratorY / denominator;
-  const speedPerStep = Math.hypot(dxPerStep, dyPerStep);
-
-  if (speedPerStep < 0.001) return null;
-
-  const latest = unwrapped[unwrapped.length - 1];
-
-  const latestUnwrappedX = latest.unwrappedX;
-  const latestY = Number(latest.y);
-
-  const maxSlopeLength = worldWidth * MAX_SLOPE_WORLD_LENGTH_RATIO;
-  const maxTByLength = maxSlopeLength / speedPerStep;
-
-  const candidates = [maxTByLength];
-
-  if (dyPerStep > 0) {
-    candidates.push((worldHeight - latestY) / dyPerStep);
-  }
-
-  if (dyPerStep < 0) {
-    candidates.push((0 - latestY) / dyPerStep);
-  }
-
-  const positive = candidates.filter((value) => Number.isFinite(value) && value > 0);
-  const t = positive.length ? Math.min(...positive) : 1;
-
-  const endUnwrappedX = latestUnwrappedX + dxPerStep * t;
-  const endY = clampY(latestY + dyPerStep * t, worldHeight);
-
-  const startX = normalizeX(latestUnwrappedX, worldWidth);
-  const dx = endUnwrappedX - latestUnwrappedX;
+  const dx = velocityXPerStep * scale;
+  const endY = clampY(latestY + velocityYPerStep * scale, worldHeight);
+  const startX = normalizeX(latestX, worldWidth);
 
   return {
-    start: {
-      ...latest,
-      x: startX,
-      y: clampY(latestY, worldHeight)
-    },
-    end: {
-      x: startX + dx,
-      y: endY
-    },
-    length: Math.hypot(dx, endY - latestY)
-  };
-}
-
-function offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
-  if (!rawSlopeLine) return null;
-
-  const startX = normalizeX(
-    Number(rawSlopeLine.start.x) + Number(waypointOffsetX || 0),
-    worldWidth
-  );
-
-  const dx = Number(rawSlopeLine.end.x) - Number(rawSlopeLine.start.x);
-
-  return {
-    start: {
-      ...rawSlopeLine.start,
-      x: startX,
-      y: clampY(Number(rawSlopeLine.start.y) + Number(waypointOffsetY || 0), worldHeight)
-    },
-    end: {
-      ...rawSlopeLine.end,
-      x: startX + dx,
-      y: clampY(Number(rawSlopeLine.end.y) + Number(waypointOffsetY || 0), worldHeight)
-    },
-    length: rawSlopeLine.length
+    start: { ...latestPoint, x: startX, y: clampY(latestY, worldHeight) },
+    end: { x: startX + dx, y: endY },
+    length: Math.hypot(dx, endY - latestY),
+    velocityXPerStep,
+    velocityYPerStep,
+    speedPerStep
   };
 }
 
@@ -601,6 +598,7 @@ function getOcrRunningState(ocrStatus) {
 
 export default function WrappedCoordinateMap({
   coordinates,
+  coordinateStreamStatus = 'connecting',
   cities = [],
   prices = [],
   ocrStatus = null,
@@ -629,7 +627,6 @@ export default function WrappedCoordinateMap({
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
   const [showPointsLayer, setShowPointsLayer] = useState(false);
-  const [showDirectionLayer, setShowDirectionLayer] = useState(true);
   const [showCityLayer, setShowCityLayer] = useState(true);
   const [selectedCityName, setSelectedCityName] = useState('');
   const [cityGoodSearch, setCityGoodSearch] = useState('');
@@ -641,6 +638,7 @@ export default function WrappedCoordinateMap({
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
   const cityClickRef = useRef(null);
+  const ignoredTrailKeysRef = useRef(new Set());
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -677,7 +675,11 @@ export default function WrappedCoordinateMap({
     };
   }, [isFullBrowserMap]);
 
-  const current = coordinates[coordinates.length - 1];
+  const orderedCoordinates = useMemo(
+    () => [...coordinates].sort(compareCoordinatePoints),
+    [coordinates]
+  );
+  const current = getLatestCoordinate(orderedCoordinates);
 
   useEffect(() => {
     if (!coordinates.length) return;
@@ -687,9 +689,10 @@ export default function WrappedCoordinateMap({
         currentTrail.map((point, index) => getPointKey(point, index))
       );
 
-      const newPoints = coordinates.filter((point, index) => {
+      const ignoredKeys = ignoredTrailKeysRef.current;
+      const newPoints = orderedCoordinates.filter((point, index) => {
         const key = getPointKey(point, index);
-        return !known.has(key);
+        return !known.has(key) && !ignoredKeys.has(key);
       });
 
       if (!newPoints.length) {
@@ -698,14 +701,18 @@ export default function WrappedCoordinateMap({
 
       return pruneTrail([...currentTrail, ...newPoints], trailWindow);
     });
-  }, [coordinates, trailWindow]);
+  }, [orderedCoordinates, trailWindow]);
 
   const displayCoordinates = useMemo(
     () =>
-      coordinates.map((point) =>
+      orderedCoordinates.map((point) =>
         applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight)
       ),
-    [coordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
+    [orderedCoordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
+  );
+  const distinctDisplayMovingCoordinates = useMemo(
+    () => getDistinctMovingCoordinates(displayCoordinates),
+    [displayCoordinates]
   );
 
   const displayTrailCoordinates = useMemo(
@@ -776,8 +783,8 @@ export default function WrappedCoordinateMap({
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
   const coordinateSpeed = useMemo(
-    () => calculateCoordinateSpeed(coordinates, worldWidth),
-    [coordinates, worldWidth]
+    () => calculateCoordinateSpeed(orderedCoordinates, worldWidth),
+    [orderedCoordinates, worldWidth]
   );
   const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
@@ -786,17 +793,25 @@ export default function WrappedCoordinateMap({
     [displayTrailCoordinates, worldWidth]
   );
 
-  const slopePointCount = clampMapSlopePointCount(mapSlopePointCount);
-
   const rawSlopeLine = useMemo(
-    () => buildSlopeLine(coordinates, worldWidth, worldHeight, slopePointCount),
-    [coordinates, worldWidth, worldHeight, slopePointCount]
+    () => buildSlopeLine(
+      distinctDisplayMovingCoordinates,
+      worldWidth,
+      worldHeight,
+      mapSlopePointCount
+    ),
+    [distinctDisplayMovingCoordinates, worldWidth, worldHeight, mapSlopePointCount]
   );
+  const latestMovementKey = useMemo(() => {
+    if (distinctDisplayMovingCoordinates.length < 2) return 'no-movement';
 
-  const slopeLine = useMemo(
-    () => offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight),
-    [rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
-  );
+    const previous = distinctDisplayMovingCoordinates[distinctDisplayMovingCoordinates.length - 2];
+    const latest = distinctDisplayMovingCoordinates[distinctDisplayMovingCoordinates.length - 1];
+
+    return `${getPointKey(previous)}>${getPointKey(latest)}:${clampMapSlopePointCount(mapSlopePointCount)}`;
+  }, [distinctDisplayMovingCoordinates, mapSlopePointCount]);
+
+  const slopeLine = rawSlopeLine;
 
   const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
@@ -833,6 +848,26 @@ export default function WrappedCoordinateMap({
 
     return Array.from({ length: count * 2 + 1 }, (_, index) => (index - count) * worldWidth);
   }, [viewportSize.width, worldWidth, zoom]);
+
+  const activeCoordinateOffset = useMemo(() => {
+    if (!displayCurrent || !tileOffsets.length) return 0;
+
+    const viewportCenterX = viewportSize.width / 2;
+    let bestOffset = tileOffsets[0];
+    let bestDistance = Infinity;
+
+    for (const offset of tileOffsets) {
+      const screenX = (displayCurrent.x + offset) * zoom + pan.x;
+      const distance = Math.abs(screenX - viewportCenterX);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestOffset = offset;
+      }
+    }
+
+    return bestOffset;
+  }, [displayCurrent, pan.x, tileOffsets, viewportSize.width, zoom]);
 
   const visibleCityMarkers = useMemo(() => {
     if (!showCityLayer || !cityMarkers.length || !tileOffsets.length) return [];
@@ -1094,6 +1129,14 @@ export default function WrappedCoordinateMap({
   };
 
   const eraseTrail = () => {
+    const currentKey = current ? getPointKey(current) : null;
+
+    ignoredTrailKeysRef.current = new Set(
+      orderedCoordinates
+        .map((point, index) => getPointKey(point, index))
+        .filter((key) => key !== currentKey)
+    );
+
     setSessionTrailRaw(current ? [current] : []);
   };
 
@@ -1187,6 +1230,25 @@ export default function WrappedCoordinateMap({
   };
 
   const renderCoordinateLayer = (offset) => {
+    return (
+      <g key={`points-${offset}`} transform={`translate(${offset}, 0)`}>
+        {showTrailLayer &&
+          trailSegments.map((segment, index) => (
+            <polyline
+              key={`trail-${offset}-${index}`}
+              points={segment.map((point) => `${point.x},${point.y}`).join(' ')}
+              className="history-line trail-line"
+              strokeWidth={trailLineWidth}
+              style={{
+              opacity: precisionMode ? 0.85 : 0.72
+              }}
+            />
+          ))}
+      </g>
+    );
+  };
+
+  const renderLiveCoordinateLayer = () => {
     const pointsToRender = showPointsLayer
       ? precisionMode
         ? displayCurrent
@@ -1198,22 +1260,10 @@ export default function WrappedCoordinateMap({
         : [];
 
     return (
-      <g key={`points-${offset}`} transform={`translate(${offset}, 0)`}>
-        {showTrailLayer &&
-          trailSegments.map((segment, index) => (
-            <polyline
-              key={`trail-${offset}-${index}`}
-              points={segment.map((point) => `${point.x},${point.y}`).join(' ')}
-              className="history-line trail-line"
-              strokeWidth={trailLineWidth}
-              style={{
-                opacity: precisionMode ? 0.85 : 0.72
-              }}
-            />
-          ))}
-
-        {showDirectionLayer && slopeLine && (
+      <g key={`live-coordinate-layer-${latestMovementKey}`} transform={`translate(${activeCoordinateOffset}, 0)`}>
+        {slopeLine && (
           <line
+            key={`slope-${latestMovementKey}`}
             x1={slopeLine.start.x}
             y1={slopeLine.start.y}
             x2={slopeLine.end.x}
@@ -1228,7 +1278,7 @@ export default function WrappedCoordinateMap({
 
         {pointsToRender.map((point, index, arr) => (
           <circle
-            key={`${offset}-${point.id || index}-${point.x}-${point.y}`}
+            key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}`}
             cx={point.x}
             cy={point.y}
             r={index === arr.length - 1 ? currentPointRadius : oldPointRadius}
@@ -1372,7 +1422,7 @@ export default function WrappedCoordinateMap({
                     aria-label="Clear buy-good search"
                     title="Clear"
                   >
-                    ×
+                    &times;
                   </button>
                 )}
               </label>
@@ -1391,7 +1441,6 @@ export default function WrappedCoordinateMap({
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
-              <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
             </div>
           )}
 
@@ -1416,7 +1465,7 @@ export default function WrappedCoordinateMap({
                       aria-label="Clear buy-good search"
                       title="Clear"
                     >
-                      Ã—
+                      &times;
                     </button>
                   )}
                 </label>
@@ -1433,6 +1482,9 @@ export default function WrappedCoordinateMap({
             </span>
             <span className="map-status-pill status-speed">
               Speed: {coordinateSpeedLabel} kt
+            </span>
+            <span className={`map-status-pill ${coordinateStreamStatus === 'connected' ? 'status-running' : 'status-unknown'}`}>
+              Stream: {coordinateStreamStatus}
             </span>
             {showCityLayer && (
               <span className="map-status-pill status-city-links">
@@ -1460,6 +1512,7 @@ export default function WrappedCoordinateMap({
               {tileOffsets.map(renderMapCopy)}
               {renderCityLayer()}
               {tileOffsets.map(renderCoordinateLayer)}
+              {renderLiveCoordinateLayer()}
             </g>
           </svg>
 
