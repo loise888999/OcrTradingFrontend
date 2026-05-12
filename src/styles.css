@@ -5119,3 +5119,36 @@ button.similar-good-chip:hover {
 .coordinate-map-shell:not(.map-full-browser-shell) .map-good-search-drawer .city-good-filter-field {
   background: rgba(2, 6, 23, 0.58);
 }
+
+/* City panel top offset: keep header below floating map controls. */
+.coordinate-map-shell:not(.map-full-browser-shell) .map-city-side-panel {
+  top: 72px;
+  max-height: calc(100% - 88px);
+  overflow: auto;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background-clip: padding-box;
+}
+
+.map-full-browser-card .map-city-side-panel {
+  top: 58px;
+  max-height: calc(100% - 74px);
+  overflow: auto;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background-clip: padding-box;
+}
+
+.coordinate-map-shell .map-city-side-panel .map-city-selection-header {
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  background-clip: padding-box;
+}
+
+@media (max-width: 720px) {
+  .coordinate-map-shell:not(.map-full-browser-shell) .map-city-side-panel,
+  .map-full-browser-card .map-city-side-panel {
+    top: 92px;
+    max-height: calc(100% - 108px);
+  }
+}
