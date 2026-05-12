@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  BarChart3,
   Compass,
   Eraser,
   MapPin,
   PackageSearch,
   Search,
   SlidersHorizontal,
-  Sparkles
+  Sparkles,
+  TrendingUp
 } from 'lucide-react';
 import SortableTable from './SortableTable.jsx';
 
@@ -109,20 +111,14 @@ function getDistanceLabel(score) {
   return 'Far / unknown';
 }
 
-function toggleValue(values, value) {
-  return values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value];
-}
-
 function PriceAgeBadge({ value }) {
   const tone = freshnessTone(value);
   return <span className={`price-age price-age-${tone}`}>{ageText(value)}</span>;
 }
 
-function ResultCard({ title, icon, children, empty }) {
+function DossierCard({ title, icon, children, empty }) {
   return (
-    <section className={`good-result-card ${empty ? 'empty' : ''}`}>
+    <section className={`good-result-card dossier-card ${empty ? 'empty' : ''}`}>
       <div className="good-result-title">
         {icon}
         <strong>{title}</strong>
@@ -133,154 +129,115 @@ function ResultCard({ title, icon, children, empty }) {
   );
 }
 
-function MainRegionPicker({ regions, selected, onChange }) {
-  return (
-    <div className="good-region-grid">
-      {regions.map((region) => (
-        <button
-          key={region}
-          type="button"
-          className={`good-region-button ${selected.includes(region) ? 'selected' : ''}`}
-          onClick={() => onChange(toggleValue(selected, region))}
-        >
-          {region}
-        </button>
-      ))}
-    </div>
-  );
+function normalizeOffer(row, tradeType, referenceCity) {
+  const price = numberValue(row.price);
+  const distanceScore = getDistanceScore(row, referenceCity);
+
+  return {
+    ...row,
+    tradeType,
+    price,
+    distanceScore,
+    distanceLabel: getDistanceLabel(distanceScore)
+  };
 }
 
-function groupBestOfferPerGood(rows, tradeAction) {
-  return Object.values(
-    rows.reduce((acc, row) => {
-      const key = row.itemName || row.item || 'Unknown';
-
-      if (!acc[key]) {
-        acc[key] = row;
-        return acc;
-      }
-
-      const currentPrice = numberValue(acc[key].price);
-      const nextPrice = numberValue(row.price);
-
-      if (tradeAction === 'buy' && nextPrice < currentPrice) {
-        acc[key] = row;
-      }
-
-      if (tradeAction === 'sell' && nextPrice > currentPrice) {
-        acc[key] = row;
-      }
-
-      return acc;
-    }, {})
-  );
+function sortByDateAsc(left, right) {
+  const leftTime = new Date(left.capturedAtUtc || 0).getTime();
+  const rightTime = new Date(right.capturedAtUtc || 0).getTime();
+  return leftTime - rightTime;
 }
 
-function buildComparisonLookup(rows, tradeAction) {
-  return rows.reduce((acc, row) => {
-    const key = String(row.itemName || '').toLowerCase();
-    if (!key) return acc;
-
-    if (!acc[key]) {
-      acc[key] = row;
-      return acc;
-    }
-
-    const currentPrice = numberValue(acc[key].price);
-    const nextPrice = numberValue(row.price);
-
-    // If user wants to buy, comparison is best sell price, so highest sell.
-    if (tradeAction === 'buy' && nextPrice > currentPrice) {
-      acc[key] = row;
-    }
-
-    // If user wants to sell, comparison is best known buy price, so lowest buy.
-    if (tradeAction === 'sell' && nextPrice < currentPrice) {
-      acc[key] = row;
-    }
-
-    return acc;
-  }, {});
+function pickCheapest(rows) {
+  return [...rows].sort((a, b) => numberValue(a.price) - numberValue(b.price))[0] || null;
 }
 
-function sortRows(rows, sortMode, tradeAction) {
-  const sorted = [...rows];
+function pickHighest(rows) {
+  return [...rows].sort((a, b) => numberValue(b.price) - numberValue(a.price))[0] || null;
+}
 
-  if (sortMode === 'closest') {
-    return sorted.sort((a, b) => {
-      const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
-      if (distanceDiff !== 0) return distanceDiff;
+function pickClosestUseful(buyRows, sellRows) {
+  const candidates = [
+    ...buyRows.map((row) => ({ ...row, actionLabel: 'Buy' })),
+    ...sellRows.map((row) => ({ ...row, actionLabel: 'Sell' }))
+  ];
 
-      return tradeAction === 'buy'
-        ? numberValue(a.price) - numberValue(b.price)
-        : numberValue(b.price) - numberValue(a.price);
-    });
+  return [...candidates].sort((a, b) => {
+    const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
+    if (distanceDiff !== 0) return distanceDiff;
+
+    if (a.actionLabel !== b.actionLabel) return a.actionLabel.localeCompare(b.actionLabel);
+
+    return a.actionLabel === 'Buy'
+      ? numberValue(a.price) - numberValue(b.price)
+      : numberValue(b.price) - numberValue(a.price);
+  })[0] || null;
+}
+
+function buildFreshness(rows) {
+  if (!rows.length) {
+    return {
+      newest: null,
+      oldest: null,
+      oldCount: 0,
+      freshCount: 0
+    };
   }
 
-  if (sortMode === 'balanced') {
-    return sorted.sort((a, b) => {
-      const aScore =
-        tradeAction === 'buy'
-          ? numberValue(a.distanceScore) * 100000 + numberValue(a.price)
-          : numberValue(a.distanceScore) * 100000 - numberValue(a.price);
+  const sorted = [...rows].filter((row) => row.capturedAtUtc).sort(sortByDateAsc);
+  const oldCount = rows.filter((row) => freshnessTone(row.capturedAtUtc) === 'old').length;
+  const freshCount = rows.filter((row) => freshnessTone(row.capturedAtUtc) === 'fresh').length;
 
-      const bScore =
-        tradeAction === 'buy'
-          ? numberValue(b.distanceScore) * 100000 + numberValue(b.price)
-          : numberValue(b.distanceScore) * 100000 - numberValue(b.price);
-
-      return aScore - bScore;
-    });
-  }
-
-  if (sortMode === 'profit') {
-    return sorted.sort((a, b) => {
-      const profitDiff = numberValue(b.potentialProfit) - numberValue(a.potentialProfit);
-      if (profitDiff !== 0) return profitDiff;
-
-      return tradeAction === 'buy'
-        ? numberValue(a.price) - numberValue(b.price)
-        : numberValue(b.price) - numberValue(a.price);
-    });
-  }
-
-  return tradeAction === 'buy'
-    ? sorted.sort((a, b) => numberValue(a.price) - numberValue(b.price))
-    : sorted.sort((a, b) => numberValue(b.price) - numberValue(a.price));
+  return {
+    newest: sorted[sorted.length - 1] || null,
+    oldest: sorted[0] || null,
+    oldCount,
+    freshCount
+  };
 }
 
-function getBestRows(rows, tradeAction) {
-  const bestPrice =
-    [...rows].sort((a, b) =>
-      tradeAction === 'buy'
-        ? numberValue(a.price) - numberValue(b.price)
-        : numberValue(b.price) - numberValue(a.price)
-    )[0] || null;
+function buildCoverageRows(buyRows, sellRows) {
+  const grouped = new Map();
 
-  const closest =
-    [...rows].sort((a, b) => {
-      const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
-      if (distanceDiff !== 0) return distanceDiff;
+  for (const row of [...buyRows, ...sellRows]) {
+    const region = row.mainRegion || 'Unassigned';
 
-      return tradeAction === 'buy'
-        ? numberValue(a.price) - numberValue(b.price)
-        : numberValue(b.price) - numberValue(a.price);
-    })[0] || null;
+    if (!grouped.has(region)) {
+      grouped.set(region, {
+        mainRegion: region,
+        buyCities: new Set(),
+        sellCities: new Set(),
+        buyOffers: 0,
+        sellOffers: 0
+      });
+    }
 
-  const profit =
-    [...rows].sort((a, b) => {
-      const profitDiff = numberValue(b.potentialProfit) - numberValue(a.potentialProfit);
-      if (profitDiff !== 0) return profitDiff;
+    const entry = grouped.get(region);
+    const city = row.city || 'Unknown';
 
-      return tradeAction === 'buy'
-        ? numberValue(a.price) - numberValue(b.price)
-        : numberValue(b.price) - numberValue(a.price);
-    })[0] || null;
+    if (row.tradeType === 'Buy') {
+      entry.buyCities.add(city);
+      entry.buyOffers += 1;
+    } else {
+      entry.sellCities.add(city);
+      entry.sellOffers += 1;
+    }
+  }
 
-  return { bestPrice, closest, profit };
+  return [...grouped.values()]
+    .map((row) => ({
+      mainRegion: row.mainRegion,
+      buyCities: row.buyCities.size,
+      sellCities: row.sellCities.size,
+      buyOffers: row.buyOffers,
+      sellOffers: row.sellOffers,
+      totalCities: new Set([...row.buyCities, ...row.sellCities]).size,
+      totalOffers: row.buyOffers + row.sellOffers
+    }))
+    .sort((a, b) => b.totalOffers - a.totalOffers || a.mainRegion.localeCompare(b.mainRegion));
 }
 
-const emptyAdvancedFilters = {
+const emptyFilters = {
   item: '',
   type: '',
   mainRegion: '',
@@ -290,97 +247,59 @@ const emptyAdvancedFilters = {
 };
 
 export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, run, api }) {
-  const [mode, setMode] = useState('simple');
-  const [tradeAction, setTradeAction] = useState('buy');
-
-  const [item, setItem] = useState('');
-  const [type, setType] = useState('');
-  const [selectedMainRegions, setSelectedMainRegions] = useState([]);
-  const [locationMode, setLocationMode] = useState('current');
+  const [filters, setFilters] = useState({ ...emptyFilters });
   const [referenceCityName, setReferenceCityName] = useState('');
-  const [sortMode, setSortMode] = useState('balanced');
-  const [showAllOffers, setShowAllOffers] = useState(true);
-  const [includeProfit, setIncludeProfit] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [onlyFreshPrices, setOnlyFreshPrices] = useState(false);
-  const [take, setTake] = useState(500);
-
-  const [advancedFilters, setAdvancedFilters] = useState({ ...emptyAdvancedFilters });
-
-  const [rows, setRows] = useState([]);
-  const [rawPrimaryRows, setRawPrimaryRows] = useState([]);
-  const [rawComparisonRows, setRawComparisonRows] = useState([]);
+  const [buyRows, setBuyRows] = useState([]);
+  const [sellRows, setSellRows] = useState([]);
+  const [rawBuyRows, setRawBuyRows] = useState([]);
+  const [rawSellRows, setRawSellRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastSearchAt, setLastSearchAt] = useState(null);
+  const [message, setMessage] = useState('');
 
   const currentCityInfo = useMemo(
     () => getCurrentCityInfo(cities, latestCity),
     [cities, latestCity]
   );
 
-  const referenceCity = useMemo(() => {
-    if (locationMode === 'current') return currentCityInfo.city;
-    if (locationMode === 'selected') return findCity(cities, referenceCityName);
-    return null;
-  }, [locationMode, referenceCityName, currentCityInfo.city, cities]);
+  const referenceCity = useMemo(
+    () => findCity(cities, referenceCityName) || currentCityInfo.city,
+    [cities, referenceCityName, currentCityInfo.city]
+  );
 
   const options = useMemo(() => {
-    const filteredForAdvancedSub = cities.filter(
-      (city) => !advancedFilters.mainRegion || city.mainRegion === advancedFilters.mainRegion
+    const filteredForSub = cities.filter(
+      (city) => !filters.mainRegion || city.mainRegion === filters.mainRegion
     );
 
-    const filteredForAdvancedSea = filteredForAdvancedSub.filter(
-      (city) => !advancedFilters.subRegion || city.subRegion === advancedFilters.subRegion
+    const filteredForSea = filteredForSub.filter(
+      (city) => !filters.subRegion || city.subRegion === filters.subRegion
     );
 
     return {
       cityNames: uniqueSorted(cities.map((city) => city.name)),
       types: uniqueSorted(tradeGoods.map((good) => good.type)),
       mainRegions: uniqueSorted(cities.map((city) => city.mainRegion)),
-      subRegions: uniqueSorted(filteredForAdvancedSub.map((city) => city.subRegion)),
-      seaTradeRegions: uniqueSorted(filteredForAdvancedSea.map((city) => city.seaTradeRegion))
+      subRegions: uniqueSorted(filteredForSub.map((city) => city.subRegion)),
+      seaTradeRegions: uniqueSorted(filteredForSea.map((city) => city.seaTradeRegion))
     };
-  }, [cities, tradeGoods, advancedFilters.mainRegion, advancedFilters.subRegion]);
+  }, [cities, tradeGoods, filters.mainRegion, filters.subRegion]);
 
-  const bestRows = useMemo(() => getBestRows(rows, tradeAction), [rows, tradeAction]);
+  const allRows = useMemo(() => [...buyRows, ...sellRows], [buyRows, sellRows]);
+  const cheapestBuy = useMemo(() => pickCheapest(buyRows), [buyRows]);
+  const highestSell = useMemo(() => pickHighest(sellRows), [sellRows]);
+  const closestUseful = useMemo(() => pickClosestUseful(buyRows, sellRows), [buyRows, sellRows]);
+  const freshness = useMemo(() => buildFreshness(allRows), [allRows]);
+  const coverageRows = useMemo(() => buildCoverageRows(buyRows, sellRows), [buyRows, sellRows]);
 
-  const actionText = tradeAction === 'buy'
-    ? {
-        title: 'Find where to buy',
-        description: 'Find where to buy a good. Sort by cheapest, closest, balanced, or best potential profit.',
-        primaryTradeType: 'Buy',
-        comparisonTradeType: 'Sell',
-        priceLabel: 'Buy Price',
-        cityLabel: 'Buy City',
-        bestPriceTitle: 'Cheapest buy offer',
-        closestTitle: 'Closest buy offer',
-        profitTitle: 'Best potential profit',
-        showAllLabel: 'Show all buy offers',
-        noResultText: 'Search a good or region to load buy offers.',
-        actionVerb: 'Buy',
-        comparisonVerb: 'Sell',
-        comparisonColumn: 'Best Sell',
-        comparedText: 'known sell price'
-      }
-    : {
-        title: 'Find where to sell',
-        description: 'Find the best places to sell a good. Sort by highest price, closest, balanced, or best profit.',
-        primaryTradeType: 'Sell',
-        comparisonTradeType: 'Buy',
-        priceLabel: 'Sell Price',
-        cityLabel: 'Sell City',
-        bestPriceTitle: 'Highest sell offer',
-        closestTitle: 'Closest sell offer',
-        profitTitle: 'Best sell profit',
-        showAllLabel: 'Show all sell offers',
-        noResultText: 'Search a good or region to load sell offers.',
-        actionVerb: 'Sell',
-        comparisonVerb: 'Buy',
-        comparisonColumn: 'Best Buy',
-        comparedText: 'known buy price'
-      };
+  const profit = cheapestBuy && highestSell
+    ? numberValue(highestSell.price) - numberValue(cheapestBuy.price)
+    : null;
 
-  const updateAdvanced = (key, value) => {
-    setAdvancedFilters((current) => {
+  const updateFilter = (key, value) => {
+    setFilters((current) => {
       const next = { ...current, [key]: value };
 
       if (key === 'mainRegion') {
@@ -396,145 +315,90 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     });
   };
 
-  const useCurrentMainRegion = () => {
-    const region = currentCityInfo.city?.mainRegion;
-    if (!region) return;
-
-    setSelectedMainRegions((current) => uniqueSorted([...current, region]));
-    setLocationMode('current');
-  };
-
   const clear = () => {
-    setItem('');
-    setType('');
-    setSelectedMainRegions([]);
-    setLocationMode('current');
+    setFilters({ ...emptyFilters });
     setReferenceCityName('');
-    setSortMode('balanced');
-    setShowAllOffers(true);
-    setIncludeProfit(true);
     setOnlyFreshPrices(false);
-    setTake(500);
-    setAdvancedFilters({ ...emptyAdvancedFilters });
-    setRows([]);
-    setRawPrimaryRows([]);
-    setRawComparisonRows([]);
+    setBuyRows([]);
+    setSellRows([]);
+    setRawBuyRows([]);
+    setRawSellRows([]);
     setLastSearchAt(null);
+    setMessage('');
   };
 
-  const buildSearchPayload = () => {
-    if (mode === 'advanced') {
-      return {
-        item: advancedFilters.item,
-        type: advancedFilters.type,
-        mainRegion: advancedFilters.mainRegion,
-        subRegion: advancedFilters.subRegion,
-        seaTradeRegion: advancedFilters.seaTradeRegion,
-        take: advancedFilters.take
-      };
-    }
-
-    return {
-      item,
-      type,
-      mainRegion: '',
-      subRegion: '',
-      seaTradeRegion: '',
-      take
-    };
-  };
-
-  const applyFrontendFiltersAndSorting = (primaryRows, comparisonRows) => {
-    const comparisonLookup = buildComparisonLookup(comparisonRows, tradeAction);
-
-    let enriched = primaryRows.map((row) => {
-      const comparison = comparisonLookup[String(row.itemName || '').toLowerCase()];
-      const distanceScore = getDistanceScore(row, referenceCity);
-      const primaryPrice = numberValue(row.price);
-      const comparisonPrice = comparison ? numberValue(comparison.price) : null;
-
-      return {
-        ...row,
-        price: primaryPrice,
-        distanceScore,
-        distanceLabel: getDistanceLabel(distanceScore),
-        comparisonCity: comparison?.city || '',
-        comparisonPrice,
-        potentialProfit:
-          comparisonPrice === null
-            ? null
-            : tradeAction === 'buy'
-              ? comparisonPrice - primaryPrice
-              : primaryPrice - comparisonPrice,
-        comparisonCapturedAtUtc: comparison?.capturedAtUtc || null
-      };
-    });
-
-    if (mode === 'simple' && selectedMainRegions.length > 0) {
-      enriched = enriched.filter((row) => selectedMainRegions.includes(row.mainRegion));
-    }
+  const applyLocalFilters = (rows, tradeType) => {
+    let normalized = rows.map((row) => normalizeOffer(row, tradeType, referenceCity));
 
     if (onlyFreshPrices) {
-      enriched = enriched.filter((row) => isFreshEnough(row.capturedAtUtc));
+      normalized = normalized.filter((row) => isFreshEnough(row.capturedAtUtc));
     }
 
-    if (!showAllOffers) {
-      enriched = groupBestOfferPerGood(enriched, tradeAction);
-    }
-
-    return sortRows(enriched, sortMode, tradeAction);
+    return normalized;
   };
 
-  const search = async () => {
-    const payload = buildSearchPayload();
+  useEffect(() => {
+    setBuyRows(applyLocalFilters(rawBuyRows, 'Buy'));
+    setSellRows(applyLocalFilters(rawSellRows, 'Sell'));
+  }, [rawBuyRows, rawSellRows, onlyFreshPrices, referenceCity]);
+
+  const analyze = async () => {
+    const item = filters.item.trim();
+
+    if (!item) {
+      setMessage('Choose a good first.');
+      setBuyRows([]);
+      setSellRows([]);
+      setRawBuyRows([]);
+      setRawSellRows([]);
+      setLastSearchAt(null);
+      return;
+    }
 
     setLoading(true);
+    setMessage('');
 
-    const [primaryData, comparisonData] = await Promise.all([
+    const payload = {
+      item,
+      type: filters.type,
+      mainRegion: filters.mainRegion,
+      subRegion: filters.subRegion,
+      seaTradeRegion: filters.seaTradeRegion,
+      take: filters.take
+    };
+
+    const [buyData, sellData] = await Promise.all([
       run(
-        () =>
-          api.getKnownPrices({
-            ...payload,
-            tradeType: actionText.primaryTradeType
-          }),
-        `Could not load ${actionText.primaryTradeType.toLowerCase()} offers`
+        () => api.getKnownPrices({ ...payload, tradeType: 'Buy' }),
+        'Could not load buy offers'
       ),
-
-      includeProfit
-        ? run(
-            () =>
-              api.getKnownPrices({
-                item: payload.item,
-                type: payload.type,
-                tradeType: actionText.comparisonTradeType,
-                take: payload.take
-              }),
-            `Could not load ${actionText.comparisonTradeType.toLowerCase()} prices`
-          )
-        : Promise.resolve([])
+      run(
+        () => api.getKnownPrices({ ...payload, tradeType: 'Sell' }),
+        'Could not load sell offers'
+      )
     ]);
 
-    const primary = primaryData || [];
-    const comparison = comparisonData || [];
+    const nextRawBuyRows = buyData || [];
+    const nextRawSellRows = sellData || [];
 
-    setRawPrimaryRows(primary);
-    setRawComparisonRows(comparison);
-    setRows(applyFrontendFiltersAndSorting(primary, comparison));
+    setRawBuyRows(nextRawBuyRows);
+    setRawSellRows(nextRawSellRows);
+    setBuyRows(applyLocalFilters(nextRawBuyRows, 'Buy'));
+    setSellRows(applyLocalFilters(nextRawSellRows, 'Sell'));
     setLastSearchAt(new Date());
     setLoading(false);
   };
 
-  const columns = [
+  const priceColumns = [
     { key: 'itemName', label: 'Good', sortable: true },
     { key: 'tradeGoodType', label: 'Type', sortable: true },
     {
       key: 'price',
-      label: actionText.priceLabel,
+      label: 'Price',
       sortable: true,
-      defaultDirection: tradeAction === 'buy' ? 'asc' : 'desc',
       render: (row) => <strong>{row.price}</strong>
     },
-    { key: 'city', label: actionText.cityLabel, sortable: true },
+    { key: 'city', label: 'City', sortable: true },
     { key: 'mainRegion', label: 'Main Region', sortable: true },
     { key: 'subRegion', label: 'Sub Region', sortable: true },
     { key: 'seaTradeRegion', label: 'Sea Trade', sortable: true },
@@ -550,34 +414,6 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
       )
     },
     {
-      key: 'potentialProfit',
-      label: 'Potential Profit',
-      sortable: true,
-      defaultDirection: 'desc',
-      render: (row) =>
-        row.potentialProfit === null || row.potentialProfit === undefined ? (
-          <span className="muted">Unknown</span>
-        ) : (
-          <span className={row.potentialProfit > 0 ? 'good-text' : 'bad-text'}>
-            {row.potentialProfit > 0 ? '+' : ''}
-            {row.potentialProfit}
-          </span>
-        )
-    },
-    {
-      key: 'comparisonCity',
-      label: actionText.comparisonColumn,
-      sortable: true,
-      render: (row) =>
-        row.comparisonCity ? (
-          <span>
-            {row.comparisonCity} / {row.comparisonPrice}
-          </span>
-        ) : (
-          <span className="muted">Unknown</span>
-        )
-    },
-    {
       key: 'capturedAtUtc',
       label: 'Last Seen',
       sortable: true,
@@ -590,6 +426,15 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     }
   ];
 
+  const coverageColumns = [
+    { key: 'mainRegion', label: 'Main Region', sortable: true },
+    { key: 'totalCities', label: 'Known Cities', sortable: true },
+    { key: 'buyCities', label: 'Buy Cities', sortable: true },
+    { key: 'sellCities', label: 'Sell Cities', sortable: true },
+    { key: 'buyOffers', label: 'Buy Offers', sortable: true },
+    { key: 'sellOffers', label: 'Sell Offers', sortable: true }
+  ];
+
   return (
     <div className="trade-subtab-stack">
       <section className="card">
@@ -597,55 +442,19 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
           <div className="find-good-header">
             <div>
               <h2>
-                <PackageSearch size={22} /> Trade goods finder
+                <PackageSearch size={22} /> Trade good dossier
               </h2>
-              <p className="muted">{actionText.description}</p>
+              <p className="muted">
+                Analyze one good: best buy, best sell, profit spread, freshness, and known market coverage.
+              </p>
             </div>
-
-            <div className="deal-mode-toggle">
-              <button
-                type="button"
-                className={mode === 'simple' ? 'active' : ''}
-                onClick={() => setMode('simple')}
-              >
-                Simple
-              </button>
-
-              <button
-                type="button"
-                className={mode === 'advanced' ? 'active' : ''}
-                onClick={() => setMode('advanced')}
-              >
-                Advanced
-              </button>
-            </div>
-          </div>
-
-          <div className="trade-action-toggle">
-            <button
-              type="button"
-              className={tradeAction === 'buy' ? 'active' : ''}
-              onClick={() => {
-                setTradeAction('buy');
-                setRows([]);
-                setRawPrimaryRows([]);
-                setRawComparisonRows([]);
-              }}
-            >
-              Find where to buy
-            </button>
 
             <button
               type="button"
-              className={tradeAction === 'sell' ? 'active' : ''}
-              onClick={() => {
-                setTradeAction('sell');
-                setRows([]);
-                setRawPrimaryRows([]);
-                setRawComparisonRows([]);
-              }}
+              className={`map-compact-button ${showAdvanced ? 'active' : ''}`}
+              onClick={() => setShowAdvanced((value) => !value)}
             >
-              Find where to sell
+              <SlidersHorizontal size={16} /> Advanced
             </button>
           </div>
 
@@ -655,21 +464,14 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               Current OCR city: {currentCityInfo.name || 'Unknown'}
             </span>
 
-            {currentCityInfo.city && (
-              <>
-                <span className="muted">
-                  {currentCityInfo.city.mainRegion} / {currentCityInfo.city.subRegion} /{' '}
-                  {currentCityInfo.city.seaTradeRegion}
-                </span>
-
-                <button type="button" className="link-button" onClick={useCurrentMainRegion}>
-                  Use current main region
-                </button>
-              </>
+            {referenceCity && (
+              <span className="muted">
+                Reference: {referenceCity.name} / {referenceCity.mainRegion || 'Unknown'}
+              </span>
             )}
           </div>
 
-          <datalist id="find-good-options">
+          <datalist id="dossier-good-options">
             {tradeGoods.map((good) => (
               <option key={good.name} value={good.name}>
                 {good.type}
@@ -677,216 +479,88 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
             ))}
           </datalist>
 
-          <datalist id="find-good-type-options">
+          <datalist id="dossier-good-type-options">
             {options.types.map((goodType) => (
               <option key={goodType} value={goodType} />
             ))}
           </datalist>
 
-          <datalist id="find-good-city-options">
+          <datalist id="dossier-city-options">
             {options.cityNames.map((cityName) => (
               <option key={cityName} value={cityName} />
             ))}
           </datalist>
 
-          <datalist id="find-good-main-region-options">
+          <datalist id="dossier-main-region-options">
             {options.mainRegions.map((region) => (
               <option key={region} value={region} />
             ))}
           </datalist>
 
-          <datalist id="find-good-sub-region-options">
+          <datalist id="dossier-sub-region-options">
             {options.subRegions.map((region) => (
               <option key={region} value={region} />
             ))}
           </datalist>
 
-          <datalist id="find-good-sea-region-options">
+          <datalist id="dossier-sea-region-options">
             {options.seaTradeRegions.map((region) => (
               <option key={region} value={region} />
             ))}
           </datalist>
 
-          {mode === 'simple' && (
-            <div className="find-good-simple">
-              <div className="simple-step">
-                <div className="simple-step-title">
-                  <span>1</span>
-                  <div>
-                    <strong>What good are you looking for?</strong>
-                    <small>
-                      You can search one good, a type, or leave it empty to browse all known {actionText.primaryTradeType.toLowerCase()} offers.
-                    </small>
-                  </div>
-                </div>
+          <div className="dossier-search-grid">
+            <label className="field">
+              <span>Good name</span>
+              <input
+                className="input"
+                list="dossier-good-options"
+                value={filters.item}
+                onChange={(event) => updateFilter('item', event.target.value)}
+                placeholder="Example: Diamond"
+              />
+            </label>
 
-                <div className="find-good-input-grid">
-                  <label className="field">
-                    <span>Good name</span>
-                    <input
-                      className="input"
-                      list="find-good-options"
-                      value={item}
-                      onChange={(e) => setItem(e.target.value)}
-                      placeholder="Example: Diamond"
-                    />
-                  </label>
+            <label className="field">
+              <span>Reference city</span>
+              <input
+                className="input"
+                list="dossier-city-options"
+                value={referenceCityName}
+                onChange={(event) => setReferenceCityName(event.target.value)}
+                placeholder={currentCityInfo.name ? `Current: ${currentCityInfo.name}` : 'Optional'}
+              />
+            </label>
 
-                  <label className="field">
-                    <span>Good type</span>
-                    <input
-                      className="input"
-                      list="find-good-type-options"
-                      value={type}
-                      onChange={(e) => setType(e.target.value)}
-                      placeholder="Any type"
-                    />
-                  </label>
-                </div>
-              </div>
+            <label className="field">
+              <span>Limit</span>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="2000"
+                value={filters.take}
+                onChange={(event) => updateFilter('take', Number(event.target.value || 500))}
+              />
+            </label>
+          </div>
 
-              <div className="simple-step">
-                <div className="simple-step-title">
-                  <span>2</span>
-                  <div>
-                    <strong>Where do you want to search?</strong>
-                    <small>Select main regions, or leave empty to search everywhere.</small>
-                  </div>
-                </div>
-
-                <MainRegionPicker
-                  regions={options.mainRegions}
-                  selected={selectedMainRegions}
-                  onChange={setSelectedMainRegions}
-                />
-              </div>
-
-              <div className="simple-step">
-                <div className="simple-step-title">
-                  <span>3</span>
-                  <div>
-                    <strong>How should results be ranked?</strong>
-                    <small>Closest uses city / sea trade / sub region / main region similarity.</small>
-                  </div>
-                </div>
-
-                <div className="find-good-input-grid">
-                  <label className="field">
-                    <span>Reference location</span>
-                    <select
-                      className="input"
-                      value={locationMode}
-                      onChange={(e) => setLocationMode(e.target.value)}
-                    >
-                      <option value="current">Closest to current OCR city</option>
-                      <option value="selected">Closest to selected city</option>
-                      <option value="none">No closeness ranking</option>
-                    </select>
-                  </label>
-
-                  {locationMode === 'selected' && (
-                    <label className="field">
-                      <span>Reference city</span>
-                      <input
-                        className="input"
-                        list="find-good-city-options"
-                        value={referenceCityName}
-                        onChange={(e) => setReferenceCityName(e.target.value)}
-                        placeholder="Choose city..."
-                      />
-                    </label>
-                  )}
-
-                  <label className="field">
-                    <span>Sort by</span>
-                    <select
-                      className="input"
-                      value={sortMode}
-                      onChange={(e) => setSortMode(e.target.value)}
-                    >
-                      <option value="balanced">
-                        {tradeAction === 'buy' ? 'Balanced: close + cheap' : 'Balanced: close + high price'}
-                      </option>
-                      <option value="cheapest">
-                        {tradeAction === 'buy' ? 'Cheapest price' : 'Highest sell price'}
-                      </option>
-                      <option value="closest">Closest location</option>
-                      <option value="profit">Best potential profit</option>
-                    </select>
-                  </label>
-
-                  <label className="field">
-                    <span>Limit</span>
-                    <input
-                      className="input"
-                      type="number"
-                      min="1"
-                      max="2000"
-                      value={take}
-                      onChange={(e) => setTake(Number(e.target.value || 500))}
-                    />
-                  </label>
-                </div>
-
-                <div className="find-good-checkbox-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={showAllOffers}
-                      onChange={(e) => setShowAllOffers(e.target.checked)}
-                    />
-                    {actionText.showAllLabel}
-                  </label>
-
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={includeProfit}
-                      onChange={(e) => setIncludeProfit(e.target.checked)}
-                    />
-                    Show potential profit
-                  </label>
-
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={onlyFreshPrices}
-                      onChange={(e) => setOnlyFreshPrices(e.target.checked)}
-                    />
-                    Hide old prices
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {mode === 'advanced' && (
+          {showAdvanced && (
             <div className="find-good-advanced">
               <div className="advanced-mode-title">
                 <SlidersHorizontal size={18} />
                 <strong>Advanced filters</strong>
-                <span className="muted">Use exact region filters and more control.</span>
+                <span className="muted">Limit dossier data by catalog type or region.</span>
               </div>
 
               <div className="deal-filter-grid">
                 <label className="field">
-                  <span>Good name</span>
-                  <input
-                    className="input"
-                    list="find-good-options"
-                    value={advancedFilters.item}
-                    onChange={(e) => updateAdvanced('item', e.target.value)}
-                    placeholder="Type good name..."
-                  />
-                </label>
-
-                <label className="field">
                   <span>Good type</span>
                   <input
                     className="input"
-                    list="find-good-type-options"
-                    value={advancedFilters.type}
-                    onChange={(e) => updateAdvanced('type', e.target.value)}
+                    list="dossier-good-type-options"
+                    value={filters.type}
+                    onChange={(event) => updateFilter('type', event.target.value)}
                     placeholder="Any type"
                   />
                 </label>
@@ -895,9 +569,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                   <span>Main region</span>
                   <input
                     className="input"
-                    list="find-good-main-region-options"
-                    value={advancedFilters.mainRegion}
-                    onChange={(e) => updateAdvanced('mainRegion', e.target.value)}
+                    list="dossier-main-region-options"
+                    value={filters.mainRegion}
+                    onChange={(event) => updateFilter('mainRegion', event.target.value)}
                     placeholder="Any"
                   />
                 </label>
@@ -906,9 +580,9 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                   <span>Sub region</span>
                   <input
                     className="input"
-                    list="find-good-sub-region-options"
-                    value={advancedFilters.subRegion}
-                    onChange={(e) => updateAdvanced('subRegion', e.target.value)}
+                    list="dossier-sub-region-options"
+                    value={filters.subRegion}
+                    onChange={(event) => updateFilter('subRegion', event.target.value)}
                     placeholder="Any"
                   />
                 </label>
@@ -917,84 +591,11 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
                   <span>Sea trade region</span>
                   <input
                     className="input"
-                    list="find-good-sea-region-options"
-                    value={advancedFilters.seaTradeRegion}
-                    onChange={(e) => updateAdvanced('seaTradeRegion', e.target.value)}
+                    list="dossier-sea-region-options"
+                    value={filters.seaTradeRegion}
+                    onChange={(event) => updateFilter('seaTradeRegion', event.target.value)}
                     placeholder="Any"
                   />
-                </label>
-
-                <label className="field">
-                  <span>Reference city</span>
-                  <input
-                    className="input"
-                    list="find-good-city-options"
-                    value={referenceCityName}
-                    onChange={(e) => {
-                      setReferenceCityName(e.target.value);
-                      setLocationMode('selected');
-                    }}
-                    placeholder="Optional"
-                  />
-                </label>
-
-                <label className="field">
-                  <span>Sort by</span>
-                  <select
-                    className="input"
-                    value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value)}
-                  >
-                    <option value="balanced">
-                      {tradeAction === 'buy' ? 'Balanced: close + cheap' : 'Balanced: close + high price'}
-                    </option>
-                    <option value="cheapest">
-                      {tradeAction === 'buy' ? 'Cheapest price' : 'Highest sell price'}
-                    </option>
-                    <option value="closest">Closest location</option>
-                    <option value="profit">Best potential profit</option>
-                  </select>
-                </label>
-
-                <label className="field">
-                  <span>Limit</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min="1"
-                    max="2000"
-                    value={advancedFilters.take}
-                    onChange={(e) => updateAdvanced('take', Number(e.target.value || 500))}
-                  />
-                </label>
-              </div>
-
-              <div className="find-good-checkbox-row">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={showAllOffers}
-                    onChange={(e) => setShowAllOffers(e.target.checked)}
-                  />
-                  {actionText.showAllLabel}
-                </label>
-
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={includeProfit}
-                    onChange={(e) => setIncludeProfit(e.target.checked)}
-                  />
-                  Show potential profit
-                </label>
-
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={onlyFreshPrices}
-                    onChange={(e) => setOnlyFreshPrices(e.target.checked)}
-                  />
-                  Hide old prices
                 </label>
               </div>
             </div>
@@ -1002,29 +603,34 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
 
           <div className="find-good-search-box">
             <div>
-              <strong>Search summary</strong>
+              <strong>Analysis summary</strong>
               <p className="muted">
-                {actionText.title}
-                {' — '}
-                {mode === 'simple'
-                  ? selectedMainRegions.length
-                    ? `Regions: ${selectedMainRegions.join(', ')}`
-                    : 'Searching everywhere'
-                  : 'Using advanced filters'}
-                {' — '}
-                Sort: {sortMode}
+                {filters.item ? `Good: ${filters.item}` : 'Choose a good to analyze'}
+                {' | '}
+                Reference: {referenceCity?.name || 'none'}
+                {' | '}
+                Prices: {onlyFreshPrices ? 'fresh only' : 'all known'}
               </p>
             </div>
 
             <div className="deal-actions">
+              <label className="dossier-fresh-toggle">
+                <input
+                  type="checkbox"
+                  checked={onlyFreshPrices}
+                  onChange={(event) => setOnlyFreshPrices(event.target.checked)}
+                />
+                Hide old prices
+              </label>
+
               <button
                 type="button"
                 className="button button-primary big-action"
-                onClick={search}
+                onClick={analyze}
                 disabled={loading}
               >
                 <Search size={17} />
-                {loading ? 'Searching...' : actionText.title}
+                {loading ? 'Analyzing...' : 'Analyze good'}
               </button>
 
               <button type="button" className="button button-secondary" onClick={clear}>
@@ -1033,113 +639,163 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
             </div>
           </div>
 
+          {message && <p className="mini-info bad-text">{message}</p>}
+
           {lastSearchAt && (
             <p className="mini-info">
-              Showing {rows.length} result{rows.length === 1 ? '' : 's'} from {rawPrimaryRows.length} known{' '}
-              {actionText.primaryTradeType.toLowerCase()} offer
-              {rawPrimaryRows.length === 1 ? '' : 's'}.
-              {includeProfit
-                ? ` Compared with ${rawComparisonRows.length} ${actionText.comparedText}${rawComparisonRows.length === 1 ? '' : 's'}.`
-                : ''}
-              {' '}Last search: {lastSearchAt.toLocaleString()}.
+              Buy offers: {buyRows.length}/{rawBuyRows.length}. Sell offers: {sellRows.length}/{rawSellRows.length}.
+              {' '}Last analysis: {lastSearchAt.toLocaleString()}.
             </p>
           )}
         </div>
       </section>
 
-      <section className="find-good-results-grid">
-        <ResultCard title={actionText.bestPriceTitle} icon={<Sparkles size={18} />} empty={!bestRows.bestPrice}>
-          {bestRows.bestPrice ? (
+      <section className="find-good-results-grid dossier-results-grid">
+        <DossierCard title="Best action" icon={<TrendingUp size={18} />} empty={!cheapestBuy || !highestSell}>
+          {cheapestBuy && highestSell ? (
             <>
-              <strong>{bestRows.bestPrice.itemName}</strong>
+              <strong>{filters.item}</strong>
               <span>
-                {actionText.actionVerb} in <b>{bestRows.bestPrice.city}</b> for {bestRows.bestPrice.price}
+                Buy in <b>{cheapestBuy.city}</b> for {cheapestBuy.price}
               </span>
               <span>
-                {bestRows.bestPrice.mainRegion} / {bestRows.bestPrice.subRegion}
+                Sell in <b>{highestSell.city}</b> for {highestSell.price}
               </span>
-              <PriceAgeBadge value={bestRows.bestPrice.capturedAtUtc} />
+              <span className={profit > 0 ? 'summary-profit' : 'bad-text'}>
+                Spread: {profit > 0 ? '+' : ''}{profit}
+              </span>
             </>
           ) : (
             <>
-              <span>No result yet.</span>
-              <small>{actionText.noResultText}</small>
+              <span>Need both buy and sell data.</span>
+              <small>Analyze a good with known buy and sell prices.</small>
             </>
           )}
-        </ResultCard>
+        </DossierCard>
 
-        <ResultCard title={actionText.closestTitle} icon={<Compass size={18} />} empty={!bestRows.closest}>
-          {bestRows.closest ? (
+        <DossierCard title="Best buy" icon={<Sparkles size={18} />} empty={!cheapestBuy}>
+          {cheapestBuy ? (
             <>
-              <strong>{bestRows.closest.itemName}</strong>
-              <span>
-                {actionText.actionVerb} in <b>{bestRows.closest.city}</b> for {bestRows.closest.price}
-              </span>
-              <span className={`closeness-pill closeness-${bestRows.closest.distanceScore}`}>
-                {bestRows.closest.distanceLabel}
-              </span>
-              <small>
-                Reference: {referenceCity?.name || 'No reference city'}
-              </small>
+              <strong>{cheapestBuy.city}</strong>
+              <span>Buy for {cheapestBuy.price}</span>
+              <span>{cheapestBuy.mainRegion} / {cheapestBuy.subRegion}</span>
+              <PriceAgeBadge value={cheapestBuy.capturedAtUtc} />
             </>
           ) : (
             <>
-              <span>No closest result yet.</span>
-              <small>Use current city or select a reference city.</small>
+              <span>No buy offer found.</span>
+              <small>Try clearing region filters.</small>
             </>
           )}
-        </ResultCard>
+        </DossierCard>
 
-        <ResultCard title={actionText.profitTitle} icon={<PackageSearch size={18} />} empty={!bestRows.profit}>
-          {bestRows.profit ? (
+        <DossierCard title="Best sell" icon={<BarChart3 size={18} />} empty={!highestSell}>
+          {highestSell ? (
             <>
-              <strong>{bestRows.profit.itemName}</strong>
-              <span>
-                {actionText.actionVerb} in <b>{bestRows.profit.city}</b> for {bestRows.profit.price}
-              </span>
-
-              {bestRows.profit.comparisonCity ? (
-                <>
-                  <span>
-                    {actionText.comparisonVerb} reference:{' '}
-                    <b>{bestRows.profit.comparisonCity}</b> / {bestRows.profit.comparisonPrice}
-                  </span>
-
-                  <span className={bestRows.profit.potentialProfit > 0 ? 'summary-profit' : 'bad-text'}>
-                    Potential profit: {bestRows.profit.potentialProfit > 0 ? '+' : ''}
-                    {bestRows.profit.potentialProfit}
-                  </span>
-                </>
-              ) : (
-                <span className="muted">No comparison price known yet</span>
-              )}
+              <strong>{highestSell.city}</strong>
+              <span>Sell for {highestSell.price}</span>
+              <span>{highestSell.mainRegion} / {highestSell.subRegion}</span>
+              <PriceAgeBadge value={highestSell.capturedAtUtc} />
             </>
           ) : (
             <>
-              <span>No profit result yet.</span>
-              <small>Enable potential profit and search again.</small>
+              <span>No sell offer found.</span>
+              <small>Try clearing region filters.</small>
             </>
           )}
-        </ResultCard>
+        </DossierCard>
+
+        <DossierCard title="Closest useful city" icon={<Compass size={18} />} empty={!closestUseful}>
+          {closestUseful ? (
+            <>
+              <strong>{closestUseful.city}</strong>
+              <span>
+                {closestUseful.actionLabel} for {closestUseful.price}
+              </span>
+              <span className={`closeness-pill closeness-${closestUseful.distanceScore}`}>
+                {closestUseful.distanceLabel}
+              </span>
+              <small>Reference: {referenceCity?.name || 'No reference city'}</small>
+            </>
+          ) : (
+            <>
+              <span>No useful city yet.</span>
+              <small>Analyze a good first.</small>
+            </>
+          )}
+        </DossierCard>
+
+        <DossierCard title="Data freshness" icon={<PackageSearch size={18} />} empty={!allRows.length}>
+          {allRows.length ? (
+            <>
+              <strong>{allRows.length} known offers</strong>
+              <span>Fresh rows: {freshness.freshCount}</span>
+              <span>Old rows: {freshness.oldCount}</span>
+              <small>Newest: {freshness.newest ? ageText(freshness.newest.capturedAtUtc) : 'Unknown'}</small>
+              <small>Oldest: {freshness.oldest ? ageText(freshness.oldest.capturedAtUtc) : 'Unknown'}</small>
+            </>
+          ) : (
+            <>
+              <span>No data loaded.</span>
+              <small>Analyze a good to inspect data age.</small>
+            </>
+          )}
+        </DossierCard>
       </section>
 
       <section className="card">
         <div className="card-body">
           <div className="tab-header">
             <div>
-              <h3>{actionText.primaryTradeType} offers</h3>
-              <p className="muted">
-                This table can show all known {actionText.primaryTradeType.toLowerCase()} offers, not only the best one.
-              </p>
+              <h3>Buy offers</h3>
+              <p className="muted">Known cities where this good can be bought.</p>
             </div>
           </div>
 
           <SortableTable
-            columns={columns}
-            rows={rows}
-            emptyMessage={`No ${actionText.primaryTradeType.toLowerCase()} offers found yet.`}
-            initialSortKey={sortMode === 'closest' ? 'distanceScore' : sortMode === 'profit' ? 'potentialProfit' : 'price'}
-            initialDirection={sortMode === 'profit' || tradeAction === 'sell' ? 'desc' : 'asc'}
+            columns={priceColumns}
+            rows={buyRows}
+            emptyMessage="No buy offers found yet."
+            initialSortKey="price"
+            initialDirection="asc"
+          />
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-body">
+          <div className="tab-header">
+            <div>
+              <h3>Sell offers</h3>
+              <p className="muted">Known cities where this good can be sold.</p>
+            </div>
+          </div>
+
+          <SortableTable
+            columns={priceColumns}
+            rows={sellRows}
+            emptyMessage="No sell offers found yet."
+            initialSortKey="price"
+            initialDirection="desc"
+          />
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-body">
+          <div className="tab-header">
+            <div>
+              <h3>Market coverage</h3>
+              <p className="muted">Known offer coverage grouped by main region.</p>
+            </div>
+          </div>
+
+          <SortableTable
+            columns={coverageColumns}
+            rows={coverageRows}
+            emptyMessage="No market coverage loaded yet."
+            initialSortKey="totalOffers"
+            initialDirection="desc"
           />
         </div>
       </section>

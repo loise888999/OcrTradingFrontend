@@ -5193,3 +5193,38 @@ button.similar-good-chip:hover {
   max-width: 100%;
   padding: 0;
 }
+
+/* Trade good dossier */
+.dossier-search-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) minmax(200px, 1.2fr) minmax(120px, 0.5fr);
+  gap: 12px;
+}
+
+.dossier-results-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dossier-card .good-result-body {
+  min-height: 128px;
+}
+
+.dossier-fresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  border-radius: 999px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+@media (max-width: 820px) {
+  .dossier-search-grid {
+    grid-template-columns: 1fr;
+  }
+}
