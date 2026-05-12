@@ -1296,7 +1296,7 @@ export default function WrappedCoordinateMap({
     <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
       <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
         <div
-          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''}`}
+          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''} ${showCityLayer && selectedCity ? 'city-side-panel-open' : ''}`}
         >
           <div className="map-toolbar-main-row">
             <div className="map-title-block">

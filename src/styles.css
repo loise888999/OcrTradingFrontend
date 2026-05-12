@@ -5123,6 +5123,7 @@ button.similar-good-chip:hover {
 /* City panel top offset: keep header below floating map controls. */
 .coordinate-map-shell:not(.map-full-browser-shell) .map-city-side-panel {
   top: 72px;
+  z-index: 40;
   max-height: calc(100% - 88px);
   overflow: auto;
   border-radius: 18px;
@@ -5132,6 +5133,7 @@ button.similar-good-chip:hover {
 
 .map-full-browser-card .map-city-side-panel {
   top: 58px;
+  z-index: 40;
   max-height: calc(100% - 74px);
   overflow: auto;
   border-radius: 18px;
@@ -5151,4 +5153,43 @@ button.similar-good-chip:hover {
     top: 92px;
     max-height: calc(100% - 108px);
   }
+}
+
+/* Keep status pills on the top toolbar row while settings are open when space allows. */
+.map-full-browser-card .map-compact-toolbar.map-settings-open .map-status-pills,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar.map-settings-open .map-status-pills {
+  order: 2;
+  flex: 1 1 360px;
+  min-width: min(360px, 100%);
+  width: auto;
+}
+
+/* When city panel is open, keep settings from extending underneath it. */
+@media (min-width: 901px) {
+  .map-full-browser-card .map-compact-toolbar.city-side-panel-open .map-settings-drawer,
+  .coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar.city-side-panel-open .map-settings-drawer {
+    width: auto;
+    max-width: calc(100% - 430px);
+    flex: 1 1 420px;
+  }
+}
+
+@media (max-width: 900px) {
+  .map-full-browser-card .map-compact-toolbar.city-side-panel-open .map-settings-drawer,
+  .coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar.city-side-panel-open .map-settings-drawer {
+    width: 100%;
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+}
+
+/* Good search opens as toolbar row, not an overlay over status pills. */
+.map-full-browser-card .map-compact-toolbar.map-good-search-open .map-good-search-drawer,
+.coordinate-map-shell:not(.map-full-browser-shell) .map-compact-toolbar.map-good-search-open .map-good-search-drawer {
+  position: static;
+  order: 4;
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
 }
