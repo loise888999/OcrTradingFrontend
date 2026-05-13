@@ -11,74 +11,16 @@ import {
   TrendingUp
 } from 'lucide-react';
 import SortableTable from './SortableTable.jsx';
-
-function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-
-function sanitizeCityName(value) {
-  if (!value) return '';
-  return String(value).split('(')[0].split('\n')[0].split('\r')[0].trim();
-}
-
-function numberValue(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
-
-function ageText(value) {
-  if (!value) return 'Unknown age';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Unknown age';
-
-  const diffMs = Date.now() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / 60000);
-
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes} min ago`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
-}
-
-function freshnessTone(value) {
-  if (!value) return 'unknown';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'unknown';
-
-  const diffHours = (Date.now() - date.getTime()) / 3600000;
-
-  if (diffHours <= 2) return 'fresh';
-  if (diffHours <= 24) return 'ok';
-  return 'old';
-}
-
-function isFreshEnough(value) {
-  const tone = freshnessTone(value);
-  return tone === 'fresh' || tone === 'ok';
-}
-
-function getCurrentCityInfo(cities, latestCity) {
-  const currentName = sanitizeCityName(latestCity?.city);
-  if (!currentName) return { name: '', city: null };
-
-  const city = cities.find(
-    (item) => String(item.name || '').toLowerCase() === currentName.toLowerCase()
-  );
-
-  return { name: currentName, city: city || null };
-}
+import {
+  PriceAgeBadge,
+  ageText,
+  formatDate,
+  freshnessTone,
+  getCurrentCityInfo,
+  isFreshEnough,
+  numberValue,
+  uniqueSorted
+} from './tradingUtils.jsx';
 
 function findCity(cities, cityName) {
   if (!cityName) return null;
@@ -109,11 +51,6 @@ function getDistanceLabel(score) {
   if (score === 2) return 'Same sub region';
   if (score === 3) return 'Same main region';
   return 'Far / unknown';
-}
-
-function PriceAgeBadge({ value }) {
-  const tone = freshnessTone(value);
-  return <span className={`price-age price-age-${tone}`}>{ageText(value)}</span>;
 }
 
 function DossierCard({ title, icon, children, empty }) {
