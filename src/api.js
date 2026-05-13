@@ -410,6 +410,27 @@ export const api = {
       })
     ),
 
+  getNpcNormalCraftingItems: ({
+    product = '',
+    category = '',
+    npc = '',
+    skill = '',
+    material = '',
+    location = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/npc-normal-crafting', {
+        product,
+        category,
+        npc,
+        skill,
+        material,
+        location,
+        take
+      })
+    ),
+
   getAdvancedRoutes: ({
     item = '',
     type = '',
