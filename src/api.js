@@ -391,6 +391,25 @@ export const api = {
       })
     ),
 
+  getSpecialCraftBonusItems: ({
+    item = '',
+    type = '',
+    bonus = '',
+    material = '',
+    location = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/special-craft-bonus-items', {
+        item,
+        type,
+        bonus,
+        material,
+        location,
+        take
+      })
+    ),
+
   getAdvancedRoutes: ({
     item = '',
     type = '',

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
+import { Hammer, PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
 import TradingGoodLookupTab from './TradingGoodLookupTab.jsx';
 import TradingDealAdvancedTab from './TradingDealAdvancedTab.jsx';
 import TradingOtherTab from './TradingOtherTab.jsx';
+import TradingSpecialCraftTab from './TradingSpecialCraftTab.jsx';
 
 export default function TradingTab({
   cities,
@@ -37,6 +38,14 @@ export default function TradingTab({
 
             <button
               type="button"
+              className={activeSubTab === 'specialCraft' ? 'active' : ''}
+              onClick={() => setActiveSubTab('specialCraft')}
+            >
+              <Hammer size={17} /> Special Craft
+            </button>
+
+            <button
+              type="button"
               className={activeSubTab === 'other' ? 'active' : ''}
               onClick={() => setActiveSubTab('other')}
             >
@@ -61,6 +70,13 @@ export default function TradingTab({
           cities={cities}
           tradeGoods={tradeGoods}
           latestCity={latestCity}
+          run={run}
+          api={api}
+        />
+      )}
+
+      {activeSubTab === 'specialCraft' && (
+        <TradingSpecialCraftTab
           run={run}
           api={api}
         />
