@@ -748,6 +748,37 @@ tr:last-child td {
   filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.35));
 }
 
+.map-marker-layer {
+  pointer-events: none;
+}
+
+.map-user-coordinate-marker line {
+  stroke: #ef4444;
+  stroke-width: 3px;
+  stroke-linecap: round;
+}
+
+.map-user-coordinate-marker circle {
+  fill: rgba(239, 68, 68, 0.18);
+  stroke: #ef4444;
+  stroke-width: 3px;
+}
+
+.map-user-coordinate-marker text {
+  fill: #111827;
+  font-weight: 800;
+}
+
+.map-marker-input-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-marker-input-field .input {
+  width: 86px;
+}
+
 .map-info {
   position: absolute;
   left: 16px;

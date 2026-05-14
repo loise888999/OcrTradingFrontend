@@ -784,6 +784,8 @@ export default function WrappedCoordinateMap({
   const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
   const [showMapInfo, setShowMapInfo] = useState(true);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
+  const [markerCoordinate, setMarkerCoordinate] = useState(null);
+  const [markerInput, setMarkerInput] = useState({ x: '', y: '' });
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
@@ -1030,6 +1032,9 @@ export default function WrappedCoordinateMap({
   const selectedCityPointRadius = precisionMode
     ? scaledRadius(zoom, 7, 3.6, 120)
     : scaledRadius(zoom, 9.5, 4.5, 150);
+  const markerRadius = precisionMode
+    ? scaledRadius(zoom, 7, 4, 120)
+    : scaledRadius(zoom, 10, 5, 160);
 
 
   const tileOffsets = useMemo(() => {
@@ -1201,6 +1206,58 @@ export default function WrappedCoordinateMap({
     return () => stage.removeEventListener('wheel', handleWheel);
   }, [keepCentered, displayCurrent, worldHeight, worldWidth]);
 
+  const getMapCoordinateFromClient = useCallback(
+    (clientX, clientY) => {
+      const stage = stageRef.current;
+      const currentZoom = zoomRef.current;
+
+      if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) return null;
+
+      const rect = stage.getBoundingClientRect();
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      const worldX = (screenX - panRef.current.x) / currentZoom;
+      const worldY = (screenY - panRef.current.y) / currentZoom;
+
+      return {
+        x: Math.round(normalizeX(worldX, worldWidth)),
+        y: Math.round(clampY(worldY, worldHeight))
+      };
+    },
+    [worldHeight, worldWidth]
+  );
+
+  const setMapMarker = useCallback(
+    (coordinate) => {
+      if (!coordinate) return;
+
+      const x = Math.round(normalizeX(coordinate.x, worldWidth));
+      const y = Math.round(clampY(coordinate.y, worldHeight));
+      const next = { x, y };
+
+      setMarkerCoordinate(next);
+      setMarkerInput({ x: String(x), y: String(y) });
+    },
+    [worldHeight, worldWidth]
+  );
+
+  const updateMarkerInput = (field, value) => {
+    setMarkerInput((currentInput) => {
+      const nextInput = { ...currentInput, [field]: value };
+      const x = Number(nextInput.x);
+      const y = Number(nextInput.y);
+
+      if (nextInput.x !== '' && nextInput.y !== '' && Number.isFinite(x) && Number.isFinite(y)) {
+        setMarkerCoordinate({
+          x: Math.round(normalizeX(x, worldWidth)),
+          y: Math.round(clampY(y, worldHeight))
+        });
+      }
+
+      return nextInput;
+    });
+  };
+
   const onMouseDown = (event) => {
     event.preventDefault();
 
@@ -1215,24 +1272,14 @@ export default function WrappedCoordinateMap({
   };
 
   const updateMouseCoordinate = (event) => {
-    const stage = stageRef.current;
-    const currentZoom = zoomRef.current;
+    const coordinate = getMapCoordinateFromClient(event.clientX, event.clientY);
 
-    if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) {
+    if (!coordinate) {
       setMouseCoordinate(null);
       return;
     }
 
-    const rect = stage.getBoundingClientRect();
-    const screenX = event.clientX - rect.left;
-    const screenY = event.clientY - rect.top;
-    const worldX = (screenX - panRef.current.x) / currentZoom;
-    const worldY = (screenY - panRef.current.y) / currentZoom;
-
-    setMouseCoordinate({
-      x: Math.round(normalizeX(worldX, worldWidth)),
-      y: Math.round(clampY(worldY, worldHeight))
-    });
+    setMouseCoordinate(coordinate);
   };
 
   const onMouseMove = (event) => {
@@ -1271,7 +1318,15 @@ export default function WrappedCoordinateMap({
     if (keepCentered) setKeepCentered(false);
   };
 
-  const endDrag = () => {
+  const endDrag = (event) => {
+    const clickState = cityClickRef.current;
+    const wasCleanClick = !clickState || !clickState.moved;
+
+    if (event && wasCleanClick) {
+      const coordinate = getMapCoordinateFromClient(event.clientX, event.clientY);
+      if (coordinate) setMapMarker(coordinate);
+    }
+
     setDragging(false);
     setLastMouse(null);
     cityClickRef.current = null;
@@ -1502,6 +1557,34 @@ export default function WrappedCoordinateMap({
     );
   };
 
+  const renderMarkerLayer = () => {
+    if (!markerCoordinate) return null;
+
+    return (
+      <g className="map-marker-layer">
+        {tileOffsets.map((offset) => {
+          const x = markerCoordinate.x + offset;
+          const y = markerCoordinate.y;
+
+          return (
+            <g
+              key={`marker-${offset}-${markerCoordinate.x}-${markerCoordinate.y}`}
+              className="map-user-coordinate-marker"
+              transform={`translate(${x}, ${y})`}
+            >
+              <line x1={-markerRadius * 1.5} y1={0} x2={markerRadius * 1.5} y2={0} />
+              <line x1={0} y1={-markerRadius * 1.5} x2={0} y2={markerRadius * 1.5} />
+              <circle cx={0} cy={0} r={markerRadius} />
+              <text x={markerRadius * 1.8} y={-markerRadius * 1.4} fontSize={markerRadius * 1.35}>
+                X {markerCoordinate.x} / Y {markerCoordinate.y}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  };
+
   return (
     <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
       <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
@@ -1651,6 +1734,36 @@ export default function WrappedCoordinateMap({
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
+              <label className="map-marker-input-field">
+                <span>Marker X</span>
+                <input
+                  className="input"
+                  type="number"
+                  value={markerInput.x}
+                  onChange={(event) => updateMarkerInput('x', event.target.value)}
+                  placeholder="X"
+                />
+              </label>
+              <label className="map-marker-input-field">
+                <span>Marker Y</span>
+                <input
+                  className="input"
+                  type="number"
+                  value={markerInput.y}
+                  onChange={(event) => updateMarkerInput('y', event.target.value)}
+                  placeholder="Y"
+                />
+              </label>
+              <Button
+                className="map-compact-button"
+                onClick={() => {
+                  setMarkerCoordinate(null);
+                  setMarkerInput({ x: '', y: '' });
+                }}
+                disabled={!markerCoordinate}
+              >
+                Clear marker
+              </Button>
             </div>
           )}
 
@@ -1723,6 +1836,7 @@ export default function WrappedCoordinateMap({
               {renderCityLayer()}
               {tileOffsets.map(renderCoordinateLayer)}
               {renderLiveCoordinateLayer()}
+              {renderMarkerLayer()}
             </g>
           </svg>
 
@@ -1733,6 +1847,7 @@ export default function WrappedCoordinateMap({
             <span className="map-info-row map-info-map">{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
             <span className="map-info-row map-info-speed">Speed: {coordinateSpeedLabel} kt</span>
             <span className="map-info-row map-info-mouse">{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
+            <span className="map-info-row map-info-marker">{markerCoordinate ? `Marker X ${markerCoordinate.x} / Y ${markerCoordinate.y}` : 'Marker: none'}</span>
             <span className="map-info-row map-info-trail-count">Trail points: {sessionTrailRaw.length}</span>
             <span className="map-info-row map-info-trail-mode">
               Trail mode:{' '}
