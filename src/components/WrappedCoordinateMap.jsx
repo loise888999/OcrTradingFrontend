@@ -1011,6 +1011,13 @@ export default function WrappedCoordinateMap({
   const currentPointRadius = precisionMode
     ? scaledRadius(zoom, 4, 2, 80)
     : scaledRadius(zoom, 8, 4, 160);
+  const currentArrowSize = currentPointRadius * 2.2;
+  const currentArrowAngle = slopeLine
+    ? (Math.atan2(
+        Number(slopeLine.end.y) - Number(slopeLine.start.y),
+        Number(slopeLine.end.x) - Number(slopeLine.start.x)
+      ) * 180) / Math.PI
+    : 0;
 
   const oldPointRadius = precisionMode
     ? scaledRadius(zoom, 2.2, 1.3, 50)
@@ -1460,18 +1467,37 @@ export default function WrappedCoordinateMap({
           />
         )}
 
-        {pointsToRender.map((point, index, arr) => (
-          <circle
-            key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}`}
-            cx={point.x}
-            cy={point.y}
-            r={index === arr.length - 1 ? currentPointRadius : oldPointRadius}
-            className={index === arr.length - 1 ? 'point current-point' : 'point'}
-            style={{
-              opacity: precisionMode && index !== arr.length - 1 ? 0.35 : 1
-            }}
-          />
-        ))}
+        {pointsToRender.map((point, index, arr) => {
+          const isCurrentPoint = index === arr.length - 1;
+
+          if (isCurrentPoint) {
+            const arrowSize = currentArrowSize;
+            const arrowTail = arrowSize * 0.72;
+            const arrowWing = arrowSize * 0.48;
+
+            return (
+              <polygon
+                key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}-arrow`}
+                points={`${arrowSize},0 ${-arrowTail},${-arrowWing} ${-arrowTail * 0.42},0 ${-arrowTail},${arrowWing}`}
+                className="current-player-arrow"
+                transform={`translate(${point.x}, ${point.y}) rotate(${currentArrowAngle})`}
+              />
+            );
+          }
+
+          return (
+            <circle
+              key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}`}
+              cx={point.x}
+              cy={point.y}
+              r={oldPointRadius}
+              className="point"
+              style={{
+                opacity: precisionMode ? 0.35 : 1
+              }}
+            />
+          );
+        })}
       </g>
     );
   };

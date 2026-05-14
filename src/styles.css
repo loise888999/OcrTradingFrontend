@@ -740,6 +740,14 @@ tr:last-child td {
   fill: #22c55e;
 }
 
+.current-player-arrow {
+  fill: #ef4444;
+  stroke: #ffffff;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 2px 5px rgba(15, 23, 42, 0.35));
+}
+
 .map-info {
   position: absolute;
   left: 16px;
