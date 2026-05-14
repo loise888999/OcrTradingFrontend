@@ -8,9 +8,11 @@ const MAP_PIXEL_HEIGHT = 2049;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const MAX_SESSION_TRAIL_POINTS = 10000;
-const MAX_SLOPE_WORLD_LENGTH_RATIO = 0.75;
+const MIN_FILTERED_DIRECTION_SPEED = 0.05;
+const GVO_NAVISH_DISTANCE_PER_SLOPE_POINT = 18;
+const GVO_NAVISH_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
-const DEFAULT_MAP_SLOPE_POINT_COUNT = 8;
+const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -257,64 +259,223 @@ function splitWrappedSegments(points, worldWidth) {
   return segments.filter((segment) => segment.length >= 2);
 }
 
-function buildSlopeLine(points, worldWidth, worldHeight, sampleCount) {
-  if (!points || points.length < 2) return null;
-
-  const recent = points.slice(-clampMapSlopePointCount(sampleCount));
-  const latestPoint = recent[recent.length - 1];
+function buildDirectionLineFromHeading(latestPoint, headingX, headingY, worldWidth, worldHeight) {
   const latestX = Number(latestPoint?.x);
   const latestY = Number(latestPoint?.y);
 
-  if (!Number.isFinite(latestX) || !Number.isFinite(latestY)) return null;
-
-  let totalDx = 0;
-  let totalDy = 0;
-  let segmentCount = 0;
-
-  for (let index = 1; index < recent.length; index += 1) {
-    const previous = recent[index - 1];
-    const current = recent[index];
-    const previousX = Number(previous?.x);
-    const previousY = Number(previous?.y);
-    const currentX = Number(current?.x);
-    const currentY = Number(current?.y);
-
-    if (
-      !Number.isFinite(previousX) ||
-      !Number.isFinite(previousY) ||
-      !Number.isFinite(currentX) ||
-      !Number.isFinite(currentY)
-    ) {
-      continue;
-    }
-
-    totalDx += unwrapDx(previousX, currentX, worldWidth);
-    totalDy += currentY - previousY;
-    segmentCount += 1;
+  if (
+    !Number.isFinite(latestX) ||
+    !Number.isFinite(latestY) ||
+    !Number.isFinite(headingX) ||
+    !Number.isFinite(headingY)
+  ) {
+    return null;
   }
 
-  if (segmentCount === 0) return null;
+  const speed = Math.hypot(headingX, headingY);
+  if (!Number.isFinite(speed) || speed < MIN_FILTERED_DIRECTION_SPEED) return null;
 
-  const velocityXPerStep = totalDx / segmentCount;
-  const velocityYPerStep = totalDy / segmentCount;
-  const speedPerStep = Math.hypot(velocityXPerStep, velocityYPerStep);
-
-  if (!Number.isFinite(speedPerStep) || speedPerStep < 0.05) return null;
-
-  const slopeLength = worldWidth * MAX_SLOPE_WORLD_LENGTH_RATIO;
-  const scale = slopeLength / speedPerStep;
-
-  const dx = velocityXPerStep * scale;
-  const endY = clampY(latestY + velocityYPerStep * scale, worldHeight);
+  const slopeLength = worldHeight;
   const startX = normalizeX(latestX, worldWidth);
+  const dx = (headingX / speed) * slopeLength;
+  const dy = (headingY / speed) * slopeLength;
+  const endY = clampY(latestY + dy, worldHeight);
 
   return {
     start: { ...latestPoint, x: startX, y: clampY(latestY, worldHeight) },
     end: { x: startX + dx, y: endY },
     length: Math.hypot(dx, endY - latestY),
-    velocityXPerStep,
-    velocityYPerStep,
-    speedPerStep
+    velocityXPerStep: headingX,
+    velocityYPerStep: headingY,
+    speedPerStep: speed
+  };
+}
+
+function buildVector(dx, dy) {
+  const x = Number(dx);
+  const y = Number(dy);
+
+  return {
+    x,
+    y,
+    length: Math.hypot(x, y)
+  };
+}
+
+function normalizeVector(vector, length = 1) {
+  if (!vector || !Number.isFinite(vector.length) || vector.length <= 0) return buildVector(0, 0);
+
+  return buildVector((vector.x / vector.length) * length, (vector.y / vector.length) * length);
+}
+
+function compositeVector(left, right) {
+  return buildVector(Number(left?.x) + Number(right?.x), Number(left?.y) + Number(right?.y));
+}
+
+function angleBetweenVectors(left, right) {
+  return Math.atan2(
+    Number(right?.x) * Number(left?.y) - Number(left?.x) * Number(right?.y),
+    Number(left?.x) * Number(right?.x) + Number(left?.y) * Number(right?.y)
+  );
+}
+
+function roundGvoNavishAngle(radian) {
+  const degrees = (radian * 180) / Math.PI;
+  const roundedToGameBearing = Math.floor(Math.round(degrees) * 0.5) * 2;
+  return (roundedToGameBearing * Math.PI) / 180;
+}
+
+function roundGvoNavishVector(vector) {
+  const normalized = normalizeVector(vector);
+  if (normalized.length <= 0) return normalized;
+
+  const angleFromEast = angleBetweenVectors(buildVector(1, 0), normalized);
+  const roundedAngle = roundGvoNavishAngle(angleFromEast);
+
+  return buildVector(Math.cos(roundedAngle), -Math.sin(roundedAngle));
+}
+
+function gvoNavishResolutionForVector(vector) {
+  if (!vector || !Number.isFinite(vector.length) || vector.length <= 0) return 0;
+  return Math.PI / 2 / vector.length;
+}
+
+function isAnotherGvoNavishDirection(currentVector, candidateVector) {
+  const resolution = gvoNavishResolutionForVector(candidateVector);
+  const angle = angleBetweenVectors(currentVector, candidateVector);
+
+  return resolution < Math.abs(angle);
+}
+
+function vectorFromPoints(previousPoint, latestPoint, worldWidth) {
+  const previousX = Number(previousPoint?.x);
+  const previousY = Number(previousPoint?.y);
+  const latestX = Number(latestPoint?.x);
+  const latestY = Number(latestPoint?.y);
+
+  if (
+    !Number.isFinite(previousX) ||
+    !Number.isFinite(previousY) ||
+    !Number.isFinite(latestX) ||
+    !Number.isFinite(latestY)
+  ) {
+    return buildVector(0, 0);
+  }
+
+  return buildVector(unwrapDx(previousX, latestX, worldWidth), latestY - previousY);
+}
+
+function createGvoNavishShipState(initialPoint, resetKey) {
+  return {
+    resetKey,
+    surveyPoint: initialPoint,
+    shipVector: buildVector(0, 0),
+    vectorHistory: [],
+    lastKey: getPointKey(initialPoint),
+    lastTime: getPointTimestamp(initialPoint)
+  };
+}
+
+function updateGvoNavishShipStateWithPoint(state, latestPoint, worldWidth, smoothingPoints) {
+  const latestKey = getPointKey(latestPoint);
+  const latestTime = getPointTimestamp(latestPoint);
+
+  if (state.lastKey === latestKey) return state;
+  if (latestTime != null && state.lastTime != null && latestTime < state.lastTime) {
+    return createGvoNavishShipState(latestPoint, state.resetKey);
+  }
+
+  const movementVector = vectorFromPoints(state.surveyPoint, latestPoint, worldWidth);
+  let nextState = {
+    ...state,
+    lastKey: latestKey,
+    lastTime: latestTime ?? state.lastTime
+  };
+
+  if (movementVector.length === 0) return nextState;
+
+  nextState = {
+    ...nextState,
+    surveyPoint: latestPoint
+  };
+
+  if (nextState.shipVector.length === 0) {
+    return {
+      ...nextState,
+      shipVector: roundGvoNavishVector(movementVector)
+    };
+  }
+
+  let headVector = movementVector;
+  let vectorHistory = nextState.vectorHistory;
+  const routeDistanceCap = clampMapSlopePointCount(smoothingPoints) * GVO_NAVISH_DISTANCE_PER_SLOPE_POINT;
+
+  for (let historyIndex = vectorHistory.length - 1; historyIndex >= 0; historyIndex -= 1) {
+    headVector = compositeVector(headVector, vectorHistory[historyIndex]);
+
+    if (isAnotherGvoNavishDirection(nextState.shipVector, headVector)) {
+      vectorHistory = vectorHistory.slice(historyIndex);
+      break;
+    }
+  }
+
+  vectorHistory = [...vectorHistory, movementVector];
+
+  if (
+    vectorHistory.length > 0 &&
+    headVector.length - vectorHistory[0].length > routeDistanceCap
+  ) {
+    vectorHistory = vectorHistory.slice(1);
+  }
+
+  return {
+    ...nextState,
+    shipVector: roundGvoNavishVector(headVector),
+    vectorHistory
+  };
+}
+
+function buildGvoNavishDirectionLine(points, previousState, worldWidth, worldHeight, smoothingPoints, resetKey) {
+  if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) {
+    return { line: null, pointCount: 0, state: null };
+  }
+
+  const validPoints = points
+    .slice(-GVO_NAVISH_REPLAY_POINT_LIMIT)
+    .filter((point) => {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      return Number.isFinite(x) && Number.isFinite(y);
+    });
+
+  if (validPoints.length === 0) return { line: null, pointCount: 0, state: null };
+
+  let state = previousState?.resetKey === resetKey ? previousState : null;
+  let startIndex = 0;
+
+  if (state) {
+    const lastIndex = validPoints.findIndex((point) => getPointKey(point) === state.lastKey);
+
+    if (lastIndex >= 0) {
+      startIndex = lastIndex + 1;
+    } else {
+      state = null;
+    }
+  }
+
+  if (!state) {
+    state = createGvoNavishShipState(validPoints[0], resetKey);
+    startIndex = 1;
+  }
+
+  for (let index = startIndex; index < validPoints.length; index += 1) {
+    state = updateGvoNavishShipStateWithPoint(state, validPoints[index], worldWidth, smoothingPoints);
+  }
+
+  return {
+    line: buildDirectionLineFromHeading(state.surveyPoint, state.shipVector.x, state.shipVector.y, worldWidth, worldHeight),
+    pointCount: state.shipVector.length > 0 ? state.vectorHistory.length + 1 : 0,
+    state
   };
 }
 
@@ -639,6 +800,7 @@ export default function WrappedCoordinateMap({
   const panRef = useRef(pan);
   const cityClickRef = useRef(null);
   const ignoredTrailKeysRef = useRef(new Set());
+  const gvoNavishShipRef = useRef(null);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -793,14 +955,35 @@ export default function WrappedCoordinateMap({
     [displayTrailCoordinates, worldWidth]
   );
 
-  const rawSlopeLine = useMemo(
-    () => buildSlopeLine(
+  const slopeFit = useMemo(
+    () => {
+      const resetKey = [
+        worldWidth,
+        worldHeight,
+        waypointOffsetX,
+        waypointOffsetY,
+        clampMapSlopePointCount(mapSlopePointCount)
+      ].join(':');
+      const result = buildGvoNavishDirectionLine(
+        distinctDisplayMovingCoordinates,
+        gvoNavishShipRef.current,
+        worldWidth,
+        worldHeight,
+        mapSlopePointCount,
+        resetKey
+      );
+
+      gvoNavishShipRef.current = result.state;
+      return result;
+    },
+    [
       distinctDisplayMovingCoordinates,
       worldWidth,
       worldHeight,
+      waypointOffsetX,
+      waypointOffsetY,
       mapSlopePointCount
-    ),
-    [distinctDisplayMovingCoordinates, worldWidth, worldHeight, mapSlopePointCount]
+    ]
   );
   const latestMovementKey = useMemo(() => {
     if (distinctDisplayMovingCoordinates.length < 2) return 'no-movement';
@@ -811,7 +994,8 @@ export default function WrappedCoordinateMap({
     return `${getPointKey(previous)}>${getPointKey(latest)}:${clampMapSlopePointCount(mapSlopePointCount)}`;
   }, [distinctDisplayMovingCoordinates, mapSlopePointCount]);
 
-  const slopeLine = rawSlopeLine;
+  const slopeLine = slopeFit.line;
+  const slopeFitCount = slopeFit.pointCount;
 
   const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
@@ -1529,7 +1713,10 @@ export default function WrappedCoordinateMap({
               {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}
             </span>
             <span className="map-info-row map-info-direction">
-              Direction max: {(MAX_SLOPE_WORLD_LENGTH_RATIO * 100).toFixed(0)}% map width
+              Direction length: map height
+            </span>
+            <span className="map-info-row map-info-direction">
+              Slope GVONavish: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
             </span>
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
