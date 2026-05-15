@@ -11,22 +11,13 @@ import {
   XCircle
 } from 'lucide-react';
 import SortableTable from './SortableTable.jsx';
-
-function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
+import { formatDate, uniqueSorted } from './tradingUtils.jsx';
 
 function parseAliases(value) {
   return String(value || '')
     .split('|')
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 }
 
 function normalizeName(value) {

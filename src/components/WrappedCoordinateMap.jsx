@@ -8,9 +8,11 @@ const MAP_PIXEL_HEIGHT = 2049;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const MAX_SESSION_TRAIL_POINTS = 10000;
-const MAX_SLOPE_WORLD_LENGTH_RATIO = 0.75;
+const MIN_FILTERED_DIRECTION_SPEED = 0.05;
+const DIRECTION_DISTANCE_PER_SLOPE_POINT = 18;
+const DIRECTION_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
-const DEFAULT_MAP_SLOPE_POINT_COUNT = 8;
+const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -105,6 +107,46 @@ function getPointTimestamp(point) {
 
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+function getPointId(point) {
+  const id = Number(point?.id ?? point?.Id ?? 0);
+  return Number.isFinite(id) ? id : 0;
+}
+
+function compareCoordinatePoints(left, right) {
+  const leftTime = getPointTimestamp(left) ?? 0;
+  const rightTime = getPointTimestamp(right) ?? 0;
+
+  if (leftTime !== rightTime) return leftTime - rightTime;
+
+  return getPointId(left) - getPointId(right);
+}
+
+function getLatestCoordinate(points) {
+  if (!points?.length) return null;
+
+  return points.reduce((latest, point) =>
+    compareCoordinatePoints(latest, point) <= 0 ? point : latest
+  );
+}
+
+function getDistinctMovingCoordinates(points) {
+  const distinct = [];
+
+  for (const point of points || []) {
+    const x = Number(point?.x);
+    const y = Number(point?.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    const previous = distinct[distinct.length - 1];
+    if (previous && Number(previous.x) === x && Number(previous.y) === y) continue;
+
+    distinct.push(point);
+  }
+
+  return distinct;
 }
 
 function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
@@ -217,107 +259,223 @@ function splitWrappedSegments(points, worldWidth) {
   return segments.filter((segment) => segment.length >= 2);
 }
 
-function buildSlopeLine(points, worldWidth, worldHeight, sampleCount = 12) {
-  if (points.length < 2) return null;
+function buildDirectionLineFromHeading(latestPoint, headingX, headingY, worldWidth, worldHeight) {
+  const latestX = Number(latestPoint?.x);
+  const latestY = Number(latestPoint?.y);
 
-  const recent = points.slice(-Math.max(2, sampleCount));
-
-  let currentX = Number(recent[0].x);
-  const unwrapped = [{ ...recent[0], unwrappedX: currentX, t: 0 }];
-
-  for (let i = 1; i < recent.length; i += 1) {
-    currentX += unwrapDx(Number(recent[i - 1].x), Number(recent[i].x), worldWidth);
-    unwrapped.push({ ...recent[i], unwrappedX: currentX, t: i });
+  if (
+    !Number.isFinite(latestX) ||
+    !Number.isFinite(latestY) ||
+    !Number.isFinite(headingX) ||
+    !Number.isFinite(headingY)
+  ) {
+    return null;
   }
 
-  const n = unwrapped.length;
-  const meanT = unwrapped.reduce((sum, point) => sum + point.t, 0) / n;
-  const meanX = unwrapped.reduce((sum, point) => sum + point.unwrappedX, 0) / n;
-  const meanY = unwrapped.reduce((sum, point) => sum + Number(point.y), 0) / n;
+  const speed = Math.hypot(headingX, headingY);
+  if (!Number.isFinite(speed) || speed < MIN_FILTERED_DIRECTION_SPEED) return null;
 
-  let denominator = 0;
-  let numeratorX = 0;
-  let numeratorY = 0;
-
-  for (const point of unwrapped) {
-    const dt = point.t - meanT;
-
-    denominator += dt * dt;
-    numeratorX += dt * (point.unwrappedX - meanX);
-    numeratorY += dt * (Number(point.y) - meanY);
-  }
-
-  if (denominator === 0) return null;
-
-  const dxPerStep = numeratorX / denominator;
-  const dyPerStep = numeratorY / denominator;
-  const speedPerStep = Math.hypot(dxPerStep, dyPerStep);
-
-  if (speedPerStep < 0.001) return null;
-
-  const latest = unwrapped[unwrapped.length - 1];
-
-  const latestUnwrappedX = latest.unwrappedX;
-  const latestY = Number(latest.y);
-
-  const maxSlopeLength = worldWidth * MAX_SLOPE_WORLD_LENGTH_RATIO;
-  const maxTByLength = maxSlopeLength / speedPerStep;
-
-  const candidates = [maxTByLength];
-
-  if (dyPerStep > 0) {
-    candidates.push((worldHeight - latestY) / dyPerStep);
-  }
-
-  if (dyPerStep < 0) {
-    candidates.push((0 - latestY) / dyPerStep);
-  }
-
-  const positive = candidates.filter((value) => Number.isFinite(value) && value > 0);
-  const t = positive.length ? Math.min(...positive) : 1;
-
-  const endUnwrappedX = latestUnwrappedX + dxPerStep * t;
-  const endY = clampY(latestY + dyPerStep * t, worldHeight);
-
-  const startX = normalizeX(latestUnwrappedX, worldWidth);
-  const dx = endUnwrappedX - latestUnwrappedX;
+  const slopeLength = worldHeight;
+  const startX = normalizeX(latestX, worldWidth);
+  const dx = (headingX / speed) * slopeLength;
+  const dy = (headingY / speed) * slopeLength;
+  const endY = clampY(latestY + dy, worldHeight);
 
   return {
-    start: {
-      ...latest,
-      x: startX,
-      y: clampY(latestY, worldHeight)
-    },
-    end: {
-      x: startX + dx,
-      y: endY
-    },
-    length: Math.hypot(dx, endY - latestY)
+    start: { ...latestPoint, x: startX, y: clampY(latestY, worldHeight) },
+    end: { x: startX + dx, y: endY },
+    length: Math.hypot(dx, endY - latestY),
+    velocityXPerStep: headingX,
+    velocityYPerStep: headingY,
+    speedPerStep: speed
   };
 }
 
-function offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
-  if (!rawSlopeLine) return null;
-
-  const startX = normalizeX(
-    Number(rawSlopeLine.start.x) + Number(waypointOffsetX || 0),
-    worldWidth
-  );
-
-  const dx = Number(rawSlopeLine.end.x) - Number(rawSlopeLine.start.x);
+function buildVector(dx, dy) {
+  const x = Number(dx);
+  const y = Number(dy);
 
   return {
-    start: {
-      ...rawSlopeLine.start,
-      x: startX,
-      y: clampY(Number(rawSlopeLine.start.y) + Number(waypointOffsetY || 0), worldHeight)
-    },
-    end: {
-      ...rawSlopeLine.end,
-      x: startX + dx,
-      y: clampY(Number(rawSlopeLine.end.y) + Number(waypointOffsetY || 0), worldHeight)
-    },
-    length: rawSlopeLine.length
+    x,
+    y,
+    length: Math.hypot(x, y)
+  };
+}
+
+function normalizeVector(vector, length = 1) {
+  if (!vector || !Number.isFinite(vector.length) || vector.length <= 0) return buildVector(0, 0);
+
+  return buildVector((vector.x / vector.length) * length, (vector.y / vector.length) * length);
+}
+
+function compositeVector(left, right) {
+  return buildVector(Number(left?.x) + Number(right?.x), Number(left?.y) + Number(right?.y));
+}
+
+function angleBetweenVectors(left, right) {
+  return Math.atan2(
+    Number(right?.x) * Number(left?.y) - Number(left?.x) * Number(right?.y),
+    Number(left?.x) * Number(right?.x) + Number(left?.y) * Number(right?.y)
+  );
+}
+
+function roundDirectionAngle(radian) {
+  const degrees = (radian * 180) / Math.PI;
+  const roundedToGameBearing = Math.floor(Math.round(degrees) * 0.5) * 2;
+  return (roundedToGameBearing * Math.PI) / 180;
+}
+
+function roundDirectionVector(vector) {
+  const normalized = normalizeVector(vector);
+  if (normalized.length <= 0) return normalized;
+
+  const angleFromEast = angleBetweenVectors(buildVector(1, 0), normalized);
+  const roundedAngle = roundDirectionAngle(angleFromEast);
+
+  return buildVector(Math.cos(roundedAngle), -Math.sin(roundedAngle));
+}
+
+function directionResolutionForVector(vector) {
+  if (!vector || !Number.isFinite(vector.length) || vector.length <= 0) return 0;
+  return Math.PI / 2 / vector.length;
+}
+
+function isAnotherRoundedDirection(currentVector, candidateVector) {
+  const resolution = directionResolutionForVector(candidateVector);
+  const angle = angleBetweenVectors(currentVector, candidateVector);
+
+  return resolution < Math.abs(angle);
+}
+
+function vectorFromPoints(previousPoint, latestPoint, worldWidth) {
+  const previousX = Number(previousPoint?.x);
+  const previousY = Number(previousPoint?.y);
+  const latestX = Number(latestPoint?.x);
+  const latestY = Number(latestPoint?.y);
+
+  if (
+    !Number.isFinite(previousX) ||
+    !Number.isFinite(previousY) ||
+    !Number.isFinite(latestX) ||
+    !Number.isFinite(latestY)
+  ) {
+    return buildVector(0, 0);
+  }
+
+  return buildVector(unwrapDx(previousX, latestX, worldWidth), latestY - previousY);
+}
+
+function createDirectionShipState(initialPoint, resetKey) {
+  return {
+    resetKey,
+    surveyPoint: initialPoint,
+    shipVector: buildVector(0, 0),
+    vectorHistory: [],
+    lastKey: getPointKey(initialPoint),
+    lastTime: getPointTimestamp(initialPoint)
+  };
+}
+
+function updateDirectionShipStateWithPoint(state, latestPoint, worldWidth, smoothingPoints) {
+  const latestKey = getPointKey(latestPoint);
+  const latestTime = getPointTimestamp(latestPoint);
+
+  if (state.lastKey === latestKey) return state;
+  if (latestTime != null && state.lastTime != null && latestTime < state.lastTime) {
+    return createDirectionShipState(latestPoint, state.resetKey);
+  }
+
+  const movementVector = vectorFromPoints(state.surveyPoint, latestPoint, worldWidth);
+  let nextState = {
+    ...state,
+    lastKey: latestKey,
+    lastTime: latestTime ?? state.lastTime
+  };
+
+  if (movementVector.length === 0) return nextState;
+
+  nextState = {
+    ...nextState,
+    surveyPoint: latestPoint
+  };
+
+  if (nextState.shipVector.length === 0) {
+    return {
+      ...nextState,
+      shipVector: roundDirectionVector(movementVector)
+    };
+  }
+
+  let headVector = movementVector;
+  let vectorHistory = nextState.vectorHistory;
+  const routeDistanceCap = clampMapSlopePointCount(smoothingPoints) * DIRECTION_DISTANCE_PER_SLOPE_POINT;
+
+  for (let historyIndex = vectorHistory.length - 1; historyIndex >= 0; historyIndex -= 1) {
+    headVector = compositeVector(headVector, vectorHistory[historyIndex]);
+
+    if (isAnotherRoundedDirection(nextState.shipVector, headVector)) {
+      vectorHistory = vectorHistory.slice(historyIndex);
+      break;
+    }
+  }
+
+  vectorHistory = [...vectorHistory, movementVector];
+
+  if (
+    vectorHistory.length > 0 &&
+    headVector.length - vectorHistory[0].length > routeDistanceCap
+  ) {
+    vectorHistory = vectorHistory.slice(1);
+  }
+
+  return {
+    ...nextState,
+    shipVector: roundDirectionVector(headVector),
+    vectorHistory
+  };
+}
+
+function buildRoundedDirectionLine(points, previousState, worldWidth, worldHeight, smoothingPoints, resetKey) {
+  if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) {
+    return { line: null, pointCount: 0, state: null };
+  }
+
+  const validPoints = points
+    .slice(-DIRECTION_REPLAY_POINT_LIMIT)
+    .filter((point) => {
+      const x = Number(point?.x);
+      const y = Number(point?.y);
+      return Number.isFinite(x) && Number.isFinite(y);
+    });
+
+  if (validPoints.length === 0) return { line: null, pointCount: 0, state: null };
+
+  let state = previousState?.resetKey === resetKey ? previousState : null;
+  let startIndex = 0;
+
+  if (state) {
+    const lastIndex = validPoints.findIndex((point) => getPointKey(point) === state.lastKey);
+
+    if (lastIndex >= 0) {
+      startIndex = lastIndex + 1;
+    } else {
+      state = null;
+    }
+  }
+
+  if (!state) {
+    state = createDirectionShipState(validPoints[0], resetKey);
+    startIndex = 1;
+  }
+
+  for (let index = startIndex; index < validPoints.length; index += 1) {
+    state = updateDirectionShipStateWithPoint(state, validPoints[index], worldWidth, smoothingPoints);
+  }
+
+  return {
+    line: buildDirectionLineFromHeading(state.surveyPoint, state.shipVector.x, state.shipVector.y, worldWidth, worldHeight),
+    pointCount: state.shipVector.length > 0 ? state.vectorHistory.length + 1 : 0,
+    state
   };
 }
 
@@ -601,6 +759,7 @@ function getOcrRunningState(ocrStatus) {
 
 export default function WrappedCoordinateMap({
   coordinates,
+  coordinateStreamStatus = 'connecting',
   cities = [],
   prices = [],
   ocrStatus = null,
@@ -625,11 +784,12 @@ export default function WrappedCoordinateMap({
   const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
   const [showMapInfo, setShowMapInfo] = useState(true);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
+  const [markerCoordinate, setMarkerCoordinate] = useState(null);
+  const [markerInput, setMarkerInput] = useState({ x: '', y: '' });
 
   const [precisionMode, setPrecisionMode] = useState(false);
   const [showTrailLayer, setShowTrailLayer] = useState(true);
   const [showPointsLayer, setShowPointsLayer] = useState(false);
-  const [showDirectionLayer, setShowDirectionLayer] = useState(true);
   const [showCityLayer, setShowCityLayer] = useState(true);
   const [selectedCityName, setSelectedCityName] = useState('');
   const [cityGoodSearch, setCityGoodSearch] = useState('');
@@ -641,6 +801,8 @@ export default function WrappedCoordinateMap({
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
   const cityClickRef = useRef(null);
+  const ignoredTrailKeysRef = useRef(new Set());
+  const roundedDirectionShipRef = useRef(null);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -677,7 +839,11 @@ export default function WrappedCoordinateMap({
     };
   }, [isFullBrowserMap]);
 
-  const current = coordinates[coordinates.length - 1];
+  const orderedCoordinates = useMemo(
+    () => [...coordinates].sort(compareCoordinatePoints),
+    [coordinates]
+  );
+  const current = getLatestCoordinate(orderedCoordinates);
 
   useEffect(() => {
     if (!coordinates.length) return;
@@ -687,9 +853,10 @@ export default function WrappedCoordinateMap({
         currentTrail.map((point, index) => getPointKey(point, index))
       );
 
-      const newPoints = coordinates.filter((point, index) => {
+      const ignoredKeys = ignoredTrailKeysRef.current;
+      const newPoints = orderedCoordinates.filter((point, index) => {
         const key = getPointKey(point, index);
-        return !known.has(key);
+        return !known.has(key) && !ignoredKeys.has(key);
       });
 
       if (!newPoints.length) {
@@ -698,14 +865,18 @@ export default function WrappedCoordinateMap({
 
       return pruneTrail([...currentTrail, ...newPoints], trailWindow);
     });
-  }, [coordinates, trailWindow]);
+  }, [orderedCoordinates, trailWindow]);
 
   const displayCoordinates = useMemo(
     () =>
-      coordinates.map((point) =>
+      orderedCoordinates.map((point) =>
         applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight)
       ),
-    [coordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
+    [orderedCoordinates, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
+  );
+  const distinctDisplayMovingCoordinates = useMemo(
+    () => getDistinctMovingCoordinates(displayCoordinates),
+    [displayCoordinates]
   );
 
   const displayTrailCoordinates = useMemo(
@@ -776,8 +947,8 @@ export default function WrappedCoordinateMap({
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
   const coordinateSpeed = useMemo(
-    () => calculateCoordinateSpeed(coordinates, worldWidth),
-    [coordinates, worldWidth]
+    () => calculateCoordinateSpeed(orderedCoordinates, worldWidth),
+    [orderedCoordinates, worldWidth]
   );
   const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
@@ -786,17 +957,47 @@ export default function WrappedCoordinateMap({
     [displayTrailCoordinates, worldWidth]
   );
 
-  const slopePointCount = clampMapSlopePointCount(mapSlopePointCount);
+  const slopeFit = useMemo(
+    () => {
+      const resetKey = [
+        worldWidth,
+        worldHeight,
+        waypointOffsetX,
+        waypointOffsetY,
+        clampMapSlopePointCount(mapSlopePointCount)
+      ].join(':');
+      const result = buildRoundedDirectionLine(
+        distinctDisplayMovingCoordinates,
+        roundedDirectionShipRef.current,
+        worldWidth,
+        worldHeight,
+        mapSlopePointCount,
+        resetKey
+      );
 
-  const rawSlopeLine = useMemo(
-    () => buildSlopeLine(coordinates, worldWidth, worldHeight, slopePointCount),
-    [coordinates, worldWidth, worldHeight, slopePointCount]
+      roundedDirectionShipRef.current = result.state;
+      return result;
+    },
+    [
+      distinctDisplayMovingCoordinates,
+      worldWidth,
+      worldHeight,
+      waypointOffsetX,
+      waypointOffsetY,
+      mapSlopePointCount
+    ]
   );
+  const latestMovementKey = useMemo(() => {
+    if (distinctDisplayMovingCoordinates.length < 2) return 'no-movement';
 
-  const slopeLine = useMemo(
-    () => offsetSlopeLine(rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight),
-    [rawSlopeLine, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight]
-  );
+    const previous = distinctDisplayMovingCoordinates[distinctDisplayMovingCoordinates.length - 2];
+    const latest = distinctDisplayMovingCoordinates[distinctDisplayMovingCoordinates.length - 1];
+
+    return `${getPointKey(previous)}>${getPointKey(latest)}:${clampMapSlopePointCount(mapSlopePointCount)}`;
+  }, [distinctDisplayMovingCoordinates, mapSlopePointCount]);
+
+  const slopeLine = slopeFit.line;
+  const slopeFitCount = slopeFit.pointCount;
 
   const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
@@ -812,6 +1013,13 @@ export default function WrappedCoordinateMap({
   const currentPointRadius = precisionMode
     ? scaledRadius(zoom, 4, 2, 80)
     : scaledRadius(zoom, 8, 4, 160);
+  const currentArrowSize = currentPointRadius * 2.2;
+  const currentArrowAngle = slopeLine
+    ? (Math.atan2(
+        Number(slopeLine.end.y) - Number(slopeLine.start.y),
+        Number(slopeLine.end.x) - Number(slopeLine.start.x)
+      ) * 180) / Math.PI
+    : 0;
 
   const oldPointRadius = precisionMode
     ? scaledRadius(zoom, 2.2, 1.3, 50)
@@ -824,6 +1032,9 @@ export default function WrappedCoordinateMap({
   const selectedCityPointRadius = precisionMode
     ? scaledRadius(zoom, 7, 3.6, 120)
     : scaledRadius(zoom, 9.5, 4.5, 150);
+  const markerRadius = precisionMode
+    ? scaledRadius(zoom, 7, 4, 120)
+    : scaledRadius(zoom, 10, 5, 160);
 
 
   const tileOffsets = useMemo(() => {
@@ -833,6 +1044,26 @@ export default function WrappedCoordinateMap({
 
     return Array.from({ length: count * 2 + 1 }, (_, index) => (index - count) * worldWidth);
   }, [viewportSize.width, worldWidth, zoom]);
+
+  const activeCoordinateOffset = useMemo(() => {
+    if (!displayCurrent || !tileOffsets.length) return 0;
+
+    const viewportCenterX = viewportSize.width / 2;
+    let bestOffset = tileOffsets[0];
+    let bestDistance = Infinity;
+
+    for (const offset of tileOffsets) {
+      const screenX = (displayCurrent.x + offset) * zoom + pan.x;
+      const distance = Math.abs(screenX - viewportCenterX);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestOffset = offset;
+      }
+    }
+
+    return bestOffset;
+  }, [displayCurrent, pan.x, tileOffsets, viewportSize.width, zoom]);
 
   const visibleCityMarkers = useMemo(() => {
     if (!showCityLayer || !cityMarkers.length || !tileOffsets.length) return [];
@@ -975,6 +1206,58 @@ export default function WrappedCoordinateMap({
     return () => stage.removeEventListener('wheel', handleWheel);
   }, [keepCentered, displayCurrent, worldHeight, worldWidth]);
 
+  const getMapCoordinateFromClient = useCallback(
+    (clientX, clientY) => {
+      const stage = stageRef.current;
+      const currentZoom = zoomRef.current;
+
+      if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) return null;
+
+      const rect = stage.getBoundingClientRect();
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      const worldX = (screenX - panRef.current.x) / currentZoom;
+      const worldY = (screenY - panRef.current.y) / currentZoom;
+
+      return {
+        x: Math.round(normalizeX(worldX, worldWidth)),
+        y: Math.round(clampY(worldY, worldHeight))
+      };
+    },
+    [worldHeight, worldWidth]
+  );
+
+  const setMapMarker = useCallback(
+    (coordinate) => {
+      if (!coordinate) return;
+
+      const x = Math.round(normalizeX(coordinate.x, worldWidth));
+      const y = Math.round(clampY(coordinate.y, worldHeight));
+      const next = { x, y };
+
+      setMarkerCoordinate(next);
+      setMarkerInput({ x: String(x), y: String(y) });
+    },
+    [worldHeight, worldWidth]
+  );
+
+  const updateMarkerInput = (field, value) => {
+    setMarkerInput((currentInput) => {
+      const nextInput = { ...currentInput, [field]: value };
+      const x = Number(nextInput.x);
+      const y = Number(nextInput.y);
+
+      if (nextInput.x !== '' && nextInput.y !== '' && Number.isFinite(x) && Number.isFinite(y)) {
+        setMarkerCoordinate({
+          x: Math.round(normalizeX(x, worldWidth)),
+          y: Math.round(clampY(y, worldHeight))
+        });
+      }
+
+      return nextInput;
+    });
+  };
+
   const onMouseDown = (event) => {
     event.preventDefault();
 
@@ -989,24 +1272,14 @@ export default function WrappedCoordinateMap({
   };
 
   const updateMouseCoordinate = (event) => {
-    const stage = stageRef.current;
-    const currentZoom = zoomRef.current;
+    const coordinate = getMapCoordinateFromClient(event.clientX, event.clientY);
 
-    if (!stage || !Number.isFinite(currentZoom) || currentZoom <= 0) {
+    if (!coordinate) {
       setMouseCoordinate(null);
       return;
     }
 
-    const rect = stage.getBoundingClientRect();
-    const screenX = event.clientX - rect.left;
-    const screenY = event.clientY - rect.top;
-    const worldX = (screenX - panRef.current.x) / currentZoom;
-    const worldY = (screenY - panRef.current.y) / currentZoom;
-
-    setMouseCoordinate({
-      x: Math.round(normalizeX(worldX, worldWidth)),
-      y: Math.round(clampY(worldY, worldHeight))
-    });
+    setMouseCoordinate(coordinate);
   };
 
   const onMouseMove = (event) => {
@@ -1045,7 +1318,15 @@ export default function WrappedCoordinateMap({
     if (keepCentered) setKeepCentered(false);
   };
 
-  const endDrag = () => {
+  const endDrag = (event) => {
+    const clickState = cityClickRef.current;
+    const wasCleanClick = !clickState || !clickState.moved;
+
+    if (event && wasCleanClick) {
+      const coordinate = getMapCoordinateFromClient(event.clientX, event.clientY);
+      if (coordinate) setMapMarker(coordinate);
+    }
+
     setDragging(false);
     setLastMouse(null);
     cityClickRef.current = null;
@@ -1094,6 +1375,14 @@ export default function WrappedCoordinateMap({
   };
 
   const eraseTrail = () => {
+    const currentKey = current ? getPointKey(current) : null;
+
+    ignoredTrailKeysRef.current = new Set(
+      orderedCoordinates
+        .map((point, index) => getPointKey(point, index))
+        .filter((key) => key !== currentKey)
+    );
+
     setSessionTrailRaw(current ? [current] : []);
   };
 
@@ -1187,6 +1476,25 @@ export default function WrappedCoordinateMap({
   };
 
   const renderCoordinateLayer = (offset) => {
+    return (
+      <g key={`points-${offset}`} transform={`translate(${offset}, 0)`}>
+        {showTrailLayer &&
+          trailSegments.map((segment, index) => (
+            <polyline
+              key={`trail-${offset}-${index}`}
+              points={segment.map((point) => `${point.x},${point.y}`).join(' ')}
+              className="history-line trail-line"
+              strokeWidth={trailLineWidth}
+              style={{
+              opacity: precisionMode ? 0.85 : 0.72
+              }}
+            />
+          ))}
+      </g>
+    );
+  };
+
+  const renderLiveCoordinateLayer = () => {
     const pointsToRender = showPointsLayer
       ? precisionMode
         ? displayCurrent
@@ -1198,22 +1506,10 @@ export default function WrappedCoordinateMap({
         : [];
 
     return (
-      <g key={`points-${offset}`} transform={`translate(${offset}, 0)`}>
-        {showTrailLayer &&
-          trailSegments.map((segment, index) => (
-            <polyline
-              key={`trail-${offset}-${index}`}
-              points={segment.map((point) => `${point.x},${point.y}`).join(' ')}
-              className="history-line trail-line"
-              strokeWidth={trailLineWidth}
-              style={{
-                opacity: precisionMode ? 0.85 : 0.72
-              }}
-            />
-          ))}
-
-        {showDirectionLayer && slopeLine && (
+      <g key={`live-coordinate-layer-${latestMovementKey}`} transform={`translate(${activeCoordinateOffset}, 0)`}>
+        {slopeLine && (
           <line
+            key={`slope-${latestMovementKey}`}
             x1={slopeLine.start.x}
             y1={slopeLine.start.y}
             x2={slopeLine.end.x}
@@ -1226,18 +1522,65 @@ export default function WrappedCoordinateMap({
           />
         )}
 
-        {pointsToRender.map((point, index, arr) => (
-          <circle
-            key={`${offset}-${point.id || index}-${point.x}-${point.y}`}
-            cx={point.x}
-            cy={point.y}
-            r={index === arr.length - 1 ? currentPointRadius : oldPointRadius}
-            className={index === arr.length - 1 ? 'point current-point' : 'point'}
-            style={{
-              opacity: precisionMode && index !== arr.length - 1 ? 0.35 : 1
-            }}
-          />
-        ))}
+        {pointsToRender.map((point, index, arr) => {
+          const isCurrentPoint = index === arr.length - 1;
+
+          if (isCurrentPoint) {
+            const arrowSize = currentArrowSize;
+            const arrowTail = arrowSize * 0.72;
+            const arrowWing = arrowSize * 0.48;
+
+            return (
+              <polygon
+                key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}-arrow`}
+                points={`${arrowSize},0 ${-arrowTail},${-arrowWing} ${-arrowTail * 0.42},0 ${-arrowTail},${arrowWing}`}
+                className="current-player-arrow"
+                transform={`translate(${point.x}, ${point.y}) rotate(${currentArrowAngle})`}
+              />
+            );
+          }
+
+          return (
+            <circle
+              key={`${latestMovementKey}-${activeCoordinateOffset}-${point.id || index}-${point.x}-${point.y}`}
+              cx={point.x}
+              cy={point.y}
+              r={oldPointRadius}
+              className="point"
+              style={{
+                opacity: precisionMode ? 0.35 : 1
+              }}
+            />
+          );
+        })}
+      </g>
+    );
+  };
+
+  const renderMarkerLayer = () => {
+    if (!markerCoordinate) return null;
+
+    return (
+      <g className="map-marker-layer">
+        {tileOffsets.map((offset) => {
+          const x = markerCoordinate.x + offset;
+          const y = markerCoordinate.y;
+
+          return (
+            <g
+              key={`marker-${offset}-${markerCoordinate.x}-${markerCoordinate.y}`}
+              className="map-user-coordinate-marker"
+              transform={`translate(${x}, ${y})`}
+            >
+              <line x1={-markerRadius * 1.5} y1={0} x2={markerRadius * 1.5} y2={0} />
+              <line x1={0} y1={-markerRadius * 1.5} x2={0} y2={markerRadius * 1.5} />
+              <circle cx={0} cy={0} r={markerRadius} />
+              <text x={markerRadius * 1.8} y={-markerRadius * 1.4} fontSize={markerRadius * 1.35}>
+                X {markerCoordinate.x} / Y {markerCoordinate.y}
+              </text>
+            </g>
+          );
+        })}
       </g>
     );
   };
@@ -1246,7 +1589,7 @@ export default function WrappedCoordinateMap({
     <div className={`full-map-shell coordinate-map-shell ${isFullBrowserMap ? 'map-full-browser-shell' : ''}`}>
       <Card className={`map-card full-map-card coordinate-map-card ${isFullBrowserMap ? 'map-full-browser-card' : ''}`}>
         <div
-          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''}`}
+          className={`map-compact-toolbar dark-header compact-header ${showGoodSearchSettings ? 'map-good-search-open' : ''} ${showMapSettings ? 'map-settings-open' : ''} ${showCityLayer && selectedCity ? 'city-side-panel-open' : ''}`}
         >
           <div className="map-toolbar-main-row">
             <div className="map-title-block">
@@ -1372,7 +1715,7 @@ export default function WrappedCoordinateMap({
                     aria-label="Clear buy-good search"
                     title="Clear"
                   >
-                    ×
+                    &times;
                   </button>
                 )}
               </label>
@@ -1391,7 +1734,36 @@ export default function WrappedCoordinateMap({
               <Toggle checked={keepCentered} onChange={setKeepCentered} label="Keep centered" />
               <Toggle checked={precisionMode} onChange={setPrecisionMode} label="Precision mode" />
               <Toggle checked={showPointsLayer} onChange={setShowPointsLayer} label="Points" />
-              <Toggle checked={showDirectionLayer} onChange={setShowDirectionLayer} label="Direction" />
+              <label className="map-marker-input-field">
+                <span>Marker X</span>
+                <input
+                  className="input"
+                  type="number"
+                  value={markerInput.x}
+                  onChange={(event) => updateMarkerInput('x', event.target.value)}
+                  placeholder="X"
+                />
+              </label>
+              <label className="map-marker-input-field">
+                <span>Marker Y</span>
+                <input
+                  className="input"
+                  type="number"
+                  value={markerInput.y}
+                  onChange={(event) => updateMarkerInput('y', event.target.value)}
+                  placeholder="Y"
+                />
+              </label>
+              <Button
+                className="map-compact-button"
+                onClick={() => {
+                  setMarkerCoordinate(null);
+                  setMarkerInput({ x: '', y: '' });
+                }}
+                disabled={!markerCoordinate}
+              >
+                Clear marker
+              </Button>
             </div>
           )}
 
@@ -1416,7 +1788,7 @@ export default function WrappedCoordinateMap({
                       aria-label="Clear buy-good search"
                       title="Clear"
                     >
-                      Ã—
+                      &times;
                     </button>
                   )}
                 </label>
@@ -1433,6 +1805,9 @@ export default function WrappedCoordinateMap({
             </span>
             <span className="map-status-pill status-speed">
               Speed: {coordinateSpeedLabel} kt
+            </span>
+            <span className={`map-status-pill ${coordinateStreamStatus === 'connected' ? 'status-running' : 'status-unknown'}`}>
+              Stream: {coordinateStreamStatus}
             </span>
             {showCityLayer && (
               <span className="map-status-pill status-city-links">
@@ -1460,6 +1835,8 @@ export default function WrappedCoordinateMap({
               {tileOffsets.map(renderMapCopy)}
               {renderCityLayer()}
               {tileOffsets.map(renderCoordinateLayer)}
+              {renderLiveCoordinateLayer()}
+              {renderMarkerLayer()}
             </g>
           </svg>
 
@@ -1470,13 +1847,17 @@ export default function WrappedCoordinateMap({
             <span className="map-info-row map-info-map">{displayCurrent ? `Map X ${displayCurrent.x} / Y ${displayCurrent.y}` : ''}</span>
             <span className="map-info-row map-info-speed">Speed: {coordinateSpeedLabel} kt</span>
             <span className="map-info-row map-info-mouse">{mouseCoordinate ? `Mouse X ${mouseCoordinate.x} / Y ${mouseCoordinate.y}` : 'Mouse off map'}</span>
+            <span className="map-info-row map-info-marker">{markerCoordinate ? `Marker X ${markerCoordinate.x} / Y ${markerCoordinate.y}` : 'Marker: none'}</span>
             <span className="map-info-row map-info-trail-count">Trail points: {sessionTrailRaw.length}</span>
             <span className="map-info-row map-info-trail-mode">
               Trail mode:{' '}
               {trailWindow === '2h' ? '2 hours' : trailWindow === '30m' ? '30 min' : 'session'}
             </span>
             <span className="map-info-row map-info-direction">
-              Direction max: {(MAX_SLOPE_WORLD_LENGTH_RATIO * 100).toFixed(0)}% map width
+              Direction length: map height
+            </span>
+            <span className="map-info-row map-info-direction">
+              Slope direction: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
             </span>
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}

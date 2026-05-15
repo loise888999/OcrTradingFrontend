@@ -1,5 +1,4 @@
-const DEFAULT_API_BASE =
-  import.meta.env.VITE_API_BASE_URL || 'https://localhost:5001';
+import { getCurrentApiBase, resolveApiBase } from './apiBase.js';
 
 function buildQuery(query = {}) {
   const params = new URLSearchParams();
@@ -29,7 +28,8 @@ function withQuery(path, query = {}) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${DEFAULT_API_BASE}${path}`, {
+  const apiBase = await resolveApiBase();
+  const response = await fetch(`${apiBase}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
@@ -53,7 +53,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  baseUrl: DEFAULT_API_BASE,
+  get baseUrl() {
+    return getCurrentApiBase();
+  },
 
   // Health
   health: () => request('/api/health'),
@@ -99,7 +101,8 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${DEFAULT_API_BASE}/api/import/cities.csv`, {
+    const apiBase = await resolveApiBase();
+    const response = await fetch(`${apiBase}/api/import/cities.csv`, {
       method: 'POST',
       body: formData
     });
@@ -112,7 +115,7 @@ export const api = {
     return response.json();
   },
 
-  exportCitiesUrl: () => `${DEFAULT_API_BASE}/api/export/cities.csv`,
+  exportCitiesUrl: () => `${getCurrentApiBase()}/api/export/cities.csv`,
 
   // Map region editor
   getMapRegions: () => request('/api/map-regions'),
@@ -143,6 +146,37 @@ export const api = {
       body: JSON.stringify(setting)
     }),
 
+  getCoordinateOcrSettings: () =>
+    request('/api/settings/coordinate-ocr'),
+
+  updateCoordinateOcrSettings: (payload) =>
+    request('/api/settings/coordinate-ocr', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  getCoordinateOcrStatus: () =>
+    request('/api/settings/coordinate-ocr/status'),
+
+  getCoordinateTemplateProfileStatus: () =>
+    request('/api/coordinate-template/profile/status'),
+
+  createCoordinateTemplateProfile: (payload) =>
+    request('/api/coordinate-template/profile', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  startCoordinateTemplateAutoProfile: () =>
+    request('/api/coordinate-template/profile/auto/start', {
+      method: 'POST'
+    }),
+
+  stopCoordinateTemplateAutoProfile: () =>
+    request('/api/coordinate-template/profile/auto/stop', {
+      method: 'POST'
+    }),
+
   // OCR controls
   startOcr: () =>
     request('/api/ocr/start', {
@@ -159,9 +193,55 @@ export const api = {
   // OCR results
   getLatestCoordinates: ({ take = 20 } = {}) =>
     request(withQuery('/api/coordinates/latest', { take })),
+  streamCoordinates: async ({
+    history = 20,
+    onCoordinate,
+    onOpen,
+    onError
+  } = {}) => {
+    if (typeof EventSource === 'undefined') {
+      onError?.(new Error('EventSource is not available'));
+      return null;
+    }
+
+    let source;
+    const apiBase = await resolveApiBase();
+
+    try {
+      source = new EventSource(
+        `${apiBase}${withQuery('/api/coordinates/stream', { history })}`
+      );
+    } catch (error) {
+      onError?.(error);
+      return null;
+    }
+
+    const handleCoordinateEvent = (event) => {
+      try {
+        onCoordinate?.(JSON.parse(event.data));
+      } catch (error) {
+        console.error('Failed to parse coordinate stream event', error, event.data);
+      }
+    };
+
+    source.addEventListener('coordinate', handleCoordinateEvent);
+    source.addEventListener('message', handleCoordinateEvent);
+
+    source.onopen = (event) => {
+      onOpen?.(event);
+    };
+
+    source.onerror = (event) => {
+      onError?.(event);
+    };
+
+    return source;
+  },
 
   getLatestCity: () => request('/api/cities/latest'),
 
+  getLatestCityGoods: ({ city = '', tradeType = '', take = 50000 } = {}) =>
+    request(withQuery('/api/trading/latest-city-goods', { city, tradeType, take })),
   getPriceHistory: ({ city = '', item = '', tradeType = '', take = 250 } = {}) =>
     request(withQuery('/api/prices/history', { city, item, tradeType, take })),
 
@@ -311,6 +391,65 @@ export const api = {
       })
     ),
 
+  getSpecialCraftBonusItems: ({
+    item = '',
+    type = '',
+    bonus = '',
+    material = '',
+    location = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/special-craft-bonus-items', {
+        item,
+        type,
+        bonus,
+        material,
+        location,
+        take
+      })
+    ),
+
+  getNpcNormalCraftingItems: ({
+    product = '',
+    category = '',
+    npc = '',
+    skill = '',
+    material = '',
+    location = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/npc-normal-crafting', {
+        product,
+        category,
+        npc,
+        skill,
+        material,
+        location,
+        take
+      })
+    ),
+
+  getFlorenceCraftsmanContributions: ({
+    good = '',
+    type = '',
+    skill = '',
+    confidence = '',
+    source = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/florence-craftsman-contribution', {
+        good,
+        type,
+        skill,
+        confidence,
+        source,
+        take
+      })
+    ),
+
   getAdvancedRoutes: ({
     item = '',
     type = '',
@@ -391,7 +530,8 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${DEFAULT_API_BASE}/api/import/prices.csv`, {
+    const apiBase = await resolveApiBase();
+    const response = await fetch(`${apiBase}/api/import/prices.csv`, {
       method: 'POST',
       body: formData
     });
@@ -404,13 +544,14 @@ export const api = {
     return response.json();
   },
 
-  exportPricesUrl: () => `${DEFAULT_API_BASE}/api/export/prices.csv`,
+  exportPricesUrl: () => `${getCurrentApiBase()}/api/export/prices.csv`,
 
   importTradeGoodsCsv: async (file) => {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${DEFAULT_API_BASE}/api/import/trade-goods.csv`, {
+    const apiBase = await resolveApiBase();
+    const response = await fetch(`${apiBase}/api/import/trade-goods.csv`, {
       method: 'POST',
       body: formData
     });
@@ -423,5 +564,5 @@ export const api = {
     return response.json();
   },
 
-  exportTradeGoodsUrl: () => `${DEFAULT_API_BASE}/api/export/trade-goods.csv`
+  exportTradeGoodsUrl: () => `${getCurrentApiBase()}/api/export/trade-goods.csv`
 };

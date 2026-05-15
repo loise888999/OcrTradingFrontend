@@ -13,58 +13,13 @@ import {
 } from 'lucide-react';
 import SortableTable from './SortableTable.jsx';
 import MultiSelectChips from './MultiSelectChips.jsx';
-
-function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-}
-
-function sanitizeCityName(value) {
-  if (!value) return '';
-  return String(value).split('(')[0].split('\n')[0].split('\r')[0].trim();
-}
-
-function numberValue(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatDate(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
-}
-
-function ageText(value) {
-  if (!value) return 'Unknown age';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Unknown age';
-
-  const diffMs = Date.now() - date.getTime();
-  const diffMinutes = Math.floor(diffMs / 60000);
-
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes} min ago`;
-
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
-
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
-}
-
-function freshnessTone(value) {
-  if (!value) return 'unknown';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'unknown';
-
-  const diffHours = (Date.now() - date.getTime()) / 3600000;
-
-  if (diffHours <= 2) return 'fresh';
-  if (diffHours <= 24) return 'ok';
-  return 'old';
-}
+import {
+  PriceAgeBadge,
+  formatDate,
+  getCurrentCityInfo,
+  numberValue,
+  uniqueSorted
+} from './tradingUtils.jsx';
 
 function pickBestRoute(routes) {
   return [...routes]
@@ -83,17 +38,6 @@ function profitLabel(value) {
   if (profit >= 800) return 'Good';
   if (profit >= 250) return 'Okay';
   return 'Low';
-}
-
-function getCurrentCityInfo(cities, latestCity) {
-  const name = sanitizeCityName(latestCity?.city);
-  if (!name) return { name: '', city: null };
-
-  const city = cities.find(
-    (item) => String(item.name || '').toLowerCase() === name.toLowerCase()
-  );
-
-  return { name, city: city || null };
 }
 
 function toggleValue(values, value) {
@@ -117,11 +61,6 @@ function RegionButtonGrid({ regions, selected, onChange }) {
       ))}
     </div>
   );
-}
-
-function PriceAgeBadge({ value }) {
-  const tone = freshnessTone(value);
-  return <span className={`price-age price-age-${tone}`}>{ageText(value)}</span>;
 }
 
 function SimpleResultCard({ title, icon, children, empty }) {

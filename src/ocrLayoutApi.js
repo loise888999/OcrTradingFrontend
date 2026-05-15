@@ -1,5 +1,4 @@
-const DEFAULT_API_BASE =
-  import.meta.env.VITE_API_BASE_URL || 'https://localhost:5001';
+import { getCurrentApiBase, resolveApiBase } from './apiBase.js';
 
 function buildQuery(query = {}) {
   const params = new URLSearchParams();
@@ -20,7 +19,8 @@ function withQuery(path, query = {}) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${DEFAULT_API_BASE}${path}`, {
+  const apiBase = await resolveApiBase();
+  const response = await fetch(`${apiBase}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
@@ -42,7 +42,9 @@ async function request(path, options = {}) {
 }
 
 export const ocrLayoutApi = {
-  baseUrl: DEFAULT_API_BASE,
+  get baseUrl() {
+    return getCurrentApiBase();
+  },
 
   health: () => request('/api/health'),
 
