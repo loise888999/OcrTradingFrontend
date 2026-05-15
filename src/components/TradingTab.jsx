@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Factory, Hammer, PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
+import { Factory, Hammer, Landmark, PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
 import TradingGoodLookupTab from './TradingGoodLookupTab.jsx';
 import TradingDealAdvancedTab from './TradingDealAdvancedTab.jsx';
 import TradingOtherTab from './TradingOtherTab.jsx';
 import TradingSpecialCraftTab from './TradingSpecialCraftTab.jsx';
 import TradingNpcCraftingTab from './TradingNpcCraftingTab.jsx';
+import TradingFlorenceContributionTab from './TradingFlorenceContributionTab.jsx';
 
 export default function TradingTab({
   cities,
@@ -55,6 +56,14 @@ export default function TradingTab({
 
             <button
               type="button"
+              className={activeSubTab === 'florenceContribution' ? 'active' : ''}
+              onClick={() => setActiveSubTab('florenceContribution')}
+            >
+              <Landmark size={17} /> Florence Contribution
+            </button>
+
+            <button
+              type="button"
               className={activeSubTab === 'other' ? 'active' : ''}
               onClick={() => setActiveSubTab('other')}
             >
@@ -93,6 +102,13 @@ export default function TradingTab({
 
       {activeSubTab === 'npcCrafting' && (
         <TradingNpcCraftingTab
+          run={run}
+          api={api}
+        />
+      )}
+
+      {activeSubTab === 'florenceContribution' && (
+        <TradingFlorenceContributionTab
           run={run}
           api={api}
         />

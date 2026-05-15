@@ -431,6 +431,25 @@ export const api = {
       })
     ),
 
+  getFlorenceCraftsmanContributions: ({
+    good = '',
+    type = '',
+    skill = '',
+    confidence = '',
+    source = '',
+    take = 500
+  } = {}) =>
+    request(
+      withQuery('/api/trading/florence-craftsman-contribution', {
+        good,
+        type,
+        skill,
+        confidence,
+        source,
+        take
+      })
+    ),
+
   getAdvancedRoutes: ({
     item = '',
     type = '',

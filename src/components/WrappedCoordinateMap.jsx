@@ -9,8 +9,8 @@ const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 const MAX_SESSION_TRAIL_POINTS = 10000;
 const MIN_FILTERED_DIRECTION_SPEED = 0.05;
-const GVO_NAVISH_DISTANCE_PER_SLOPE_POINT = 18;
-const GVO_NAVISH_REPLAY_POINT_LIMIT = 500;
+const DIRECTION_DISTANCE_PER_SLOPE_POINT = 18;
+const DIRECTION_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
 
@@ -319,29 +319,29 @@ function angleBetweenVectors(left, right) {
   );
 }
 
-function roundGvoNavishAngle(radian) {
+function roundDirectionAngle(radian) {
   const degrees = (radian * 180) / Math.PI;
   const roundedToGameBearing = Math.floor(Math.round(degrees) * 0.5) * 2;
   return (roundedToGameBearing * Math.PI) / 180;
 }
 
-function roundGvoNavishVector(vector) {
+function roundDirectionVector(vector) {
   const normalized = normalizeVector(vector);
   if (normalized.length <= 0) return normalized;
 
   const angleFromEast = angleBetweenVectors(buildVector(1, 0), normalized);
-  const roundedAngle = roundGvoNavishAngle(angleFromEast);
+  const roundedAngle = roundDirectionAngle(angleFromEast);
 
   return buildVector(Math.cos(roundedAngle), -Math.sin(roundedAngle));
 }
 
-function gvoNavishResolutionForVector(vector) {
+function directionResolutionForVector(vector) {
   if (!vector || !Number.isFinite(vector.length) || vector.length <= 0) return 0;
   return Math.PI / 2 / vector.length;
 }
 
-function isAnotherGvoNavishDirection(currentVector, candidateVector) {
-  const resolution = gvoNavishResolutionForVector(candidateVector);
+function isAnotherRoundedDirection(currentVector, candidateVector) {
+  const resolution = directionResolutionForVector(candidateVector);
   const angle = angleBetweenVectors(currentVector, candidateVector);
 
   return resolution < Math.abs(angle);
@@ -365,7 +365,7 @@ function vectorFromPoints(previousPoint, latestPoint, worldWidth) {
   return buildVector(unwrapDx(previousX, latestX, worldWidth), latestY - previousY);
 }
 
-function createGvoNavishShipState(initialPoint, resetKey) {
+function createDirectionShipState(initialPoint, resetKey) {
   return {
     resetKey,
     surveyPoint: initialPoint,
@@ -376,13 +376,13 @@ function createGvoNavishShipState(initialPoint, resetKey) {
   };
 }
 
-function updateGvoNavishShipStateWithPoint(state, latestPoint, worldWidth, smoothingPoints) {
+function updateDirectionShipStateWithPoint(state, latestPoint, worldWidth, smoothingPoints) {
   const latestKey = getPointKey(latestPoint);
   const latestTime = getPointTimestamp(latestPoint);
 
   if (state.lastKey === latestKey) return state;
   if (latestTime != null && state.lastTime != null && latestTime < state.lastTime) {
-    return createGvoNavishShipState(latestPoint, state.resetKey);
+    return createDirectionShipState(latestPoint, state.resetKey);
   }
 
   const movementVector = vectorFromPoints(state.surveyPoint, latestPoint, worldWidth);
@@ -402,18 +402,18 @@ function updateGvoNavishShipStateWithPoint(state, latestPoint, worldWidth, smoot
   if (nextState.shipVector.length === 0) {
     return {
       ...nextState,
-      shipVector: roundGvoNavishVector(movementVector)
+      shipVector: roundDirectionVector(movementVector)
     };
   }
 
   let headVector = movementVector;
   let vectorHistory = nextState.vectorHistory;
-  const routeDistanceCap = clampMapSlopePointCount(smoothingPoints) * GVO_NAVISH_DISTANCE_PER_SLOPE_POINT;
+  const routeDistanceCap = clampMapSlopePointCount(smoothingPoints) * DIRECTION_DISTANCE_PER_SLOPE_POINT;
 
   for (let historyIndex = vectorHistory.length - 1; historyIndex >= 0; historyIndex -= 1) {
     headVector = compositeVector(headVector, vectorHistory[historyIndex]);
 
-    if (isAnotherGvoNavishDirection(nextState.shipVector, headVector)) {
+    if (isAnotherRoundedDirection(nextState.shipVector, headVector)) {
       vectorHistory = vectorHistory.slice(historyIndex);
       break;
     }
@@ -430,18 +430,18 @@ function updateGvoNavishShipStateWithPoint(state, latestPoint, worldWidth, smoot
 
   return {
     ...nextState,
-    shipVector: roundGvoNavishVector(headVector),
+    shipVector: roundDirectionVector(headVector),
     vectorHistory
   };
 }
 
-function buildGvoNavishDirectionLine(points, previousState, worldWidth, worldHeight, smoothingPoints, resetKey) {
+function buildRoundedDirectionLine(points, previousState, worldWidth, worldHeight, smoothingPoints, resetKey) {
   if (!points?.length || !Number.isFinite(worldWidth) || worldWidth <= 0) {
     return { line: null, pointCount: 0, state: null };
   }
 
   const validPoints = points
-    .slice(-GVO_NAVISH_REPLAY_POINT_LIMIT)
+    .slice(-DIRECTION_REPLAY_POINT_LIMIT)
     .filter((point) => {
       const x = Number(point?.x);
       const y = Number(point?.y);
@@ -464,12 +464,12 @@ function buildGvoNavishDirectionLine(points, previousState, worldWidth, worldHei
   }
 
   if (!state) {
-    state = createGvoNavishShipState(validPoints[0], resetKey);
+    state = createDirectionShipState(validPoints[0], resetKey);
     startIndex = 1;
   }
 
   for (let index = startIndex; index < validPoints.length; index += 1) {
-    state = updateGvoNavishShipStateWithPoint(state, validPoints[index], worldWidth, smoothingPoints);
+    state = updateDirectionShipStateWithPoint(state, validPoints[index], worldWidth, smoothingPoints);
   }
 
   return {
@@ -802,7 +802,7 @@ export default function WrappedCoordinateMap({
   const panRef = useRef(pan);
   const cityClickRef = useRef(null);
   const ignoredTrailKeysRef = useRef(new Set());
-  const gvoNavishShipRef = useRef(null);
+  const roundedDirectionShipRef = useRef(null);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -966,16 +966,16 @@ export default function WrappedCoordinateMap({
         waypointOffsetY,
         clampMapSlopePointCount(mapSlopePointCount)
       ].join(':');
-      const result = buildGvoNavishDirectionLine(
+      const result = buildRoundedDirectionLine(
         distinctDisplayMovingCoordinates,
-        gvoNavishShipRef.current,
+        roundedDirectionShipRef.current,
         worldWidth,
         worldHeight,
         mapSlopePointCount,
         resetKey
       );
 
-      gvoNavishShipRef.current = result.state;
+      roundedDirectionShipRef.current = result.state;
       return result;
     },
     [
@@ -1857,7 +1857,7 @@ export default function WrappedCoordinateMap({
               Direction length: map height
             </span>
             <span className="map-info-row map-info-direction">
-              Slope GVONavish: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
+              Slope direction: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
             </span>
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
