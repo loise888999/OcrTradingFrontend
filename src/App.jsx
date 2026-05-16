@@ -29,6 +29,7 @@ const DEFAULT_WAYPOINT_OFFSET_Y = 0;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
+const DEFAULT_MAP_SLOPE_OUTLIER_FILTER = 'balanced';
 const MAP_IMAGE_URL = '/maps/world-map.png';
 const PRICE_HISTORY_INITIAL_VISIBLE = 20;
 const PRICE_HISTORY_LOAD_STEP = 20;
@@ -57,6 +58,13 @@ function clampMapSlopePointCount(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
   return Math.max(3, Math.min(25, Math.round(parsed)));
+}
+
+function normalizeMapSlopeOutlierFilter(value) {
+  const normalized = String(value || DEFAULT_MAP_SLOPE_OUTLIER_FILTER).trim().toLowerCase();
+  return ['off', 'balanced', 'strict'].includes(normalized)
+    ? normalized
+    : DEFAULT_MAP_SLOPE_OUTLIER_FILTER;
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -825,6 +833,26 @@ function SettingsTab({
                 }
               />
             </Field>
+
+            <Field
+              label="Direction OCR cleanup"
+              hint="Removes bad one-point coordinate spikes before calculating slope direction."
+            >
+              <select
+                className="input"
+                value={settings.mapSlopeOutlierFilter}
+                onChange={(event) =>
+                  saveMapSetting(
+                    'mapSlopeOutlierFilter',
+                    normalizeMapSlopeOutlierFilter(event.target.value)
+                  )
+                }
+              >
+                <option value="off">Off</option>
+                <option value="balanced">Balanced</option>
+                <option value="strict">Strict</option>
+              </select>
+            </Field>
           </div>
         </Card>
 
@@ -891,7 +919,8 @@ export default function App() {
     waypointOffsetY: DEFAULT_WAYPOINT_OFFSET_Y,
     ocrInterval: DEFAULT_OCR_INTERVAL,
     cityInterval: DEFAULT_CITY_INTERVAL,
-    mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT
+    mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT,
+    mapSlopeOutlierFilter: DEFAULT_MAP_SLOPE_OUTLIER_FILTER
   });
 
   const run = useCallback(async (fn, fallbackMessage = 'Request failed') => {
@@ -1030,6 +1059,9 @@ export default function App() {
         cityInterval: Number(data.settings.cityInterval ?? current.cityInterval),
         mapSlopePointCount: clampMapSlopePointCount(
           data.settings.mapSlopePointCount ?? current.mapSlopePointCount
+        ),
+        mapSlopeOutlierFilter: normalizeMapSlopeOutlierFilter(
+          data.settings.mapSlopeOutlierFilter ?? current.mapSlopeOutlierFilter
         )
       }));
     }
@@ -1159,6 +1191,7 @@ export default function App() {
             waypointOffsetX={settings.waypointOffsetX}
             waypointOffsetY={settings.waypointOffsetY}
             mapSlopePointCount={settings.mapSlopePointCount}
+            mapSlopeOutlierFilter={settings.mapSlopeOutlierFilter}
             refreshCoordinates={refreshCoordinates}
           />
         )}

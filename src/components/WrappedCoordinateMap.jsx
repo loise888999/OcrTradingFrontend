@@ -13,6 +13,31 @@ const DIRECTION_DISTANCE_PER_SLOPE_POINT = 18;
 const DIRECTION_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
+const DEFAULT_MAP_SLOPE_OUTLIER_FILTER = 'balanced';
+const SLOPE_OUTLIER_FILTERS = {
+  balanced: {
+    minSpikeDistance: 12,
+    spikeLengthMultiplier: 3,
+    spikeOppositionDot: -0.65,
+    directDistanceMultiplier: 2.25,
+    directDistanceRatio: 0.35,
+    segmentMinDistance: 18,
+    segmentLengthMultiplier: 4,
+    segmentAgreeDot: 0.78,
+    segmentDisagreeDot: -0.45
+  },
+  strict: {
+    minSpikeDistance: 7,
+    spikeLengthMultiplier: 2.2,
+    spikeOppositionDot: -0.45,
+    directDistanceMultiplier: 3,
+    directDistanceRatio: 0.55,
+    segmentMinDistance: 12,
+    segmentLengthMultiplier: 3,
+    segmentAgreeDot: 0.65,
+    segmentDisagreeDot: -0.25
+  }
+};
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -54,6 +79,13 @@ function clampMapSlopePointCount(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
   return Math.max(3, Math.min(25, Math.round(parsed)));
+}
+
+function normalizeMapSlopeOutlierFilter(value) {
+  const normalized = String(value || DEFAULT_MAP_SLOPE_OUTLIER_FILTER).trim().toLowerCase();
+  return normalized === 'off' || normalized === 'balanced' || normalized === 'strict'
+    ? normalized
+    : DEFAULT_MAP_SLOPE_OUTLIER_FILTER;
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -363,6 +395,200 @@ function vectorFromPoints(previousPoint, latestPoint, worldWidth) {
   }
 
   return buildVector(unwrapDx(previousX, latestX, worldWidth), latestY - previousY);
+}
+
+function vectorDot(left, right) {
+  return Number(left?.x) * Number(right?.x) + Number(left?.y) * Number(right?.y);
+}
+
+function normalizedVectorDot(left, right) {
+  const leftLength = Number(left?.length);
+  const rightLength = Number(right?.length);
+  if (!Number.isFinite(leftLength) || !Number.isFinite(rightLength) || leftLength <= 0 || rightLength <= 0) return 1;
+
+  return vectorDot(left, right) / (leftLength * rightLength);
+}
+
+function medianNumber(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value > MIN_FILTERED_DIRECTION_SPEED)
+    .sort((left, right) => left - right);
+
+  if (!sorted.length) return 0;
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function buildMovementVectors(points, worldWidth) {
+  const vectors = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    vectors.push(vectorFromPoints(points[index - 1], points[index], worldWidth));
+  }
+
+  return vectors;
+}
+
+function localMedianVectorLength(vectors, centerIndex, excludeIndexes = [], extraLengths = [], radius = 3) {
+  const excluded = new Set(excludeIndexes);
+  const lengths = [...extraLengths];
+  const start = Math.max(0, centerIndex - radius);
+  const end = Math.min(vectors.length - 1, centerIndex + radius);
+
+  for (let index = start; index <= end; index += 1) {
+    if (!excluded.has(index)) lengths.push(vectors[index]?.length);
+  }
+
+  return medianNumber(lengths);
+}
+
+function averageUnitVector(vectors, startIndex, endIndex) {
+  let x = 0;
+  let y = 0;
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const vector = vectors[index];
+    if (!vector || vector.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+    const unit = normalizeVector(vector);
+    x += unit.x;
+    y += unit.y;
+  }
+
+  return buildVector(x, y);
+}
+
+function buildDirectionPointSignature(points) {
+  return points
+    .slice(-DIRECTION_REPLAY_POINT_LIMIT)
+    .map((point, index) => getPointKey(point, index))
+    .join('|');
+}
+
+function cleanDirectionPointsForSlope(points, worldWidth, filterMode) {
+  const mode = normalizeMapSlopeOutlierFilter(filterMode);
+  const originalVectorCount = Math.max(0, (points?.length || 0) - 1);
+
+  if (mode === 'off' || !points?.length || points.length < 3) {
+    return {
+      points: points || [],
+      originalVectorCount,
+      cleanedVectorCount: originalVectorCount,
+      rejectedPointCount: 0,
+      rejectedVectorCount: 0,
+      signature: ''
+    };
+  }
+
+  const settings = SLOPE_OUTLIER_FILTERS[mode] || SLOPE_OUTLIER_FILTERS.balanced;
+  const vectors = buildMovementVectors(points, worldWidth);
+  const rejectedPointIndexes = new Set();
+
+  for (let pointIndex = 1; pointIndex < points.length - 1; pointIndex += 1) {
+    const incomingIndex = pointIndex - 1;
+    const outgoingIndex = pointIndex;
+    const incoming = vectors[incomingIndex];
+    const outgoing = vectors[outgoingIndex];
+    const direct = vectorFromPoints(points[pointIndex - 1], points[pointIndex + 1], worldWidth);
+
+    if (
+      !incoming ||
+      !outgoing ||
+      incoming.length <= MIN_FILTERED_DIRECTION_SPEED ||
+      outgoing.length <= MIN_FILTERED_DIRECTION_SPEED
+    ) {
+      continue;
+    }
+
+    const localMedian = localMedianVectorLength(
+      vectors,
+      incomingIndex,
+      [incomingIndex, outgoingIndex],
+      [direct.length]
+    ) || Math.max(direct.length, 1);
+    const requiredLength = Math.max(
+      settings.minSpikeDistance,
+      localMedian * settings.spikeLengthMultiplier
+    );
+    const directLimit = Math.max(
+      localMedian * settings.directDistanceMultiplier,
+      Math.min(incoming.length, outgoing.length) * settings.directDistanceRatio
+    );
+
+    if (
+      incoming.length >= requiredLength &&
+      outgoing.length >= requiredLength &&
+      normalizedVectorDot(incoming, outgoing) <= settings.spikeOppositionDot &&
+      direct.length <= directLimit
+    ) {
+      rejectedPointIndexes.add(pointIndex);
+    }
+  }
+
+  let entries = points
+    .map((point, originalIndex) => ({ point, originalIndex }))
+    .filter((entry) => !rejectedPointIndexes.has(entry.originalIndex));
+
+  if (entries.length >= 5) {
+    const cleanedVectors = buildMovementVectors(entries.map((entry) => entry.point), worldWidth);
+    const rejectedCleanedIndexes = new Set();
+
+    for (let vectorIndex = 1; vectorIndex < cleanedVectors.length - 1; vectorIndex += 1) {
+      const candidate = cleanedVectors[vectorIndex];
+      if (!candidate || candidate.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+      const previousHeading = averageUnitVector(
+        cleanedVectors,
+        Math.max(0, vectorIndex - 2),
+        vectorIndex - 1
+      );
+      const nextHeading = averageUnitVector(
+        cleanedVectors,
+        vectorIndex + 1,
+        Math.min(cleanedVectors.length - 1, vectorIndex + 2)
+      );
+      const localMedian = localMedianVectorLength(cleanedVectors, vectorIndex, [vectorIndex]);
+      const requiredLength = Math.max(
+        settings.segmentMinDistance,
+        Math.max(localMedian, 1) * settings.segmentLengthMultiplier
+      );
+
+      if (
+        previousHeading.length > MIN_FILTERED_DIRECTION_SPEED &&
+        nextHeading.length > MIN_FILTERED_DIRECTION_SPEED &&
+        candidate.length >= requiredLength &&
+        normalizedVectorDot(previousHeading, nextHeading) >= settings.segmentAgreeDot &&
+        normalizedVectorDot(candidate, previousHeading) <= settings.segmentDisagreeDot &&
+        normalizedVectorDot(candidate, nextHeading) <= settings.segmentDisagreeDot
+      ) {
+        rejectedCleanedIndexes.add(vectorIndex + 1);
+      }
+    }
+
+    if (rejectedCleanedIndexes.size) {
+      for (const cleanedIndex of rejectedCleanedIndexes) {
+        const entry = entries[cleanedIndex];
+        if (entry) rejectedPointIndexes.add(entry.originalIndex);
+      }
+
+      entries = entries.filter((entry) => !rejectedPointIndexes.has(entry.originalIndex));
+    }
+  }
+
+  const cleanedPoints = entries.map((entry) => entry.point);
+  const cleanedVectorCount = Math.max(0, cleanedPoints.length - 1);
+
+  return {
+    points: cleanedPoints,
+    originalVectorCount,
+    cleanedVectorCount,
+    rejectedPointCount: rejectedPointIndexes.size,
+    rejectedVectorCount: Math.max(0, originalVectorCount - cleanedVectorCount),
+    signature: buildDirectionPointSignature(cleanedPoints)
+  };
 }
 
 function createDirectionShipState(initialPoint, resetKey) {
@@ -770,6 +996,7 @@ export default function WrappedCoordinateMap({
   waypointOffsetX,
   waypointOffsetY,
   mapSlopePointCount = DEFAULT_MAP_SLOPE_POINT_COUNT,
+  mapSlopeOutlierFilter = DEFAULT_MAP_SLOPE_OUTLIER_FILTER,
   refreshCoordinates
 }) {
   const [zoom, setZoom] = useState(0.075);
@@ -957,6 +1184,12 @@ export default function WrappedCoordinateMap({
     [displayTrailCoordinates, worldWidth]
   );
 
+  const slopeOutlierFilter = normalizeMapSlopeOutlierFilter(mapSlopeOutlierFilter);
+  const slopeCleanup = useMemo(
+    () => cleanDirectionPointsForSlope(distinctDisplayMovingCoordinates, worldWidth, slopeOutlierFilter),
+    [distinctDisplayMovingCoordinates, worldWidth, slopeOutlierFilter]
+  );
+
   const slopeFit = useMemo(
     () => {
       const resetKey = [
@@ -964,10 +1197,12 @@ export default function WrappedCoordinateMap({
         worldHeight,
         waypointOffsetX,
         waypointOffsetY,
-        clampMapSlopePointCount(mapSlopePointCount)
+        clampMapSlopePointCount(mapSlopePointCount),
+        slopeOutlierFilter,
+        slopeOutlierFilter === 'off' ? '' : slopeCleanup.signature
       ].join(':');
       const result = buildRoundedDirectionLine(
-        distinctDisplayMovingCoordinates,
+        slopeCleanup.points,
         roundedDirectionShipRef.current,
         worldWidth,
         worldHeight,
@@ -979,7 +1214,8 @@ export default function WrappedCoordinateMap({
       return result;
     },
     [
-      distinctDisplayMovingCoordinates,
+      slopeCleanup,
+      slopeOutlierFilter,
       worldWidth,
       worldHeight,
       waypointOffsetX,
@@ -998,6 +1234,7 @@ export default function WrappedCoordinateMap({
 
   const slopeLine = slopeFit.line;
   const slopeFitCount = slopeFit.pointCount;
+  const slopeCleanupActive = slopeCleanup.rejectedPointCount > 0 || slopeCleanup.rejectedVectorCount > 0;
 
   const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
@@ -1859,6 +2096,13 @@ export default function WrappedCoordinateMap({
             <span className="map-info-row map-info-direction">
               Slope direction: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
             </span>
+            {slopeCleanupActive && (
+              <span className="map-info-row map-info-direction">
+                Direction cleanup: {slopeCleanup.cleanedVectorCount}/{slopeCleanup.originalVectorCount} vectors,
+                {' '}{slopeCleanup.rejectedPointCount} point{slopeCleanup.rejectedPointCount === 1 ? '' : 's'} removed,
+                {' '}{slopeCleanup.rejectedVectorCount} vector{slopeCleanup.rejectedVectorCount === 1 ? '' : 's'} removed
+              </span>
+            )}
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
             {showCityLayer && hasCityGoodSearch && (
