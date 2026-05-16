@@ -395,6 +395,7 @@ export const api = {
     item = '',
     type = '',
     bonus = '',
+    minBonusValue = '',
     material = '',
     location = '',
     take = 500
@@ -404,6 +405,7 @@ export const api = {
         item,
         type,
         bonus,
+        minBonusValue,
         material,
         location,
         take
