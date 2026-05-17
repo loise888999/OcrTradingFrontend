@@ -230,6 +230,11 @@ function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
   return elapsedSeconds > 0 ? totalDistance / elapsedSeconds : 0;
 }
 
+function getBackendSpeedKnots(point) {
+  const value = Number(point?.speedKnots ?? point?.SpeedKnots);
+  return Number.isFinite(value) ? value : null;
+}
+
 function getPointKey(point, index = 0) {
   const timestamp =
     point?.capturedAtUtc ||
@@ -1173,10 +1178,10 @@ export default function WrappedCoordinateMap({
   const ocrRunningState = getOcrRunningState(ocrStatus);
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
-  const coordinateSpeed = useMemo(
-    () => calculateCoordinateSpeed(orderedCoordinates, worldWidth),
-    [orderedCoordinates, worldWidth]
-  );
+  const coordinateSpeed = useMemo(() => {
+    const backendSpeed = getBackendSpeedKnots(current);
+    return backendSpeed ?? calculateCoordinateSpeed(orderedCoordinates, worldWidth);
+  }, [current, orderedCoordinates, worldWidth]);
   const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
   const trailSegments = useMemo(

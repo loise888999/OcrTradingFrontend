@@ -228,6 +228,9 @@ export const api = {
   // OCR results
   getLatestCoordinates: ({ take = 20 } = {}) =>
     request(withQuery('/api/coordinates/latest', { take })),
+
+  getNavigationSpeed: () => request('/api/navigation/speed'),
+
   streamCoordinates: async ({
     history = 20,
     onCoordinate,
