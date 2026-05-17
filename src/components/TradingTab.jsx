@@ -11,6 +11,7 @@ export default function TradingTab({
   cities,
   tradeGoods,
   latestCity,
+  latestCoordinate,
   run,
   api,
   refreshCatalogs
@@ -78,6 +79,7 @@ export default function TradingTab({
           cities={cities}
           tradeGoods={tradeGoods}
           latestCity={latestCity}
+          latestCoordinate={latestCoordinate}
           run={run}
           api={api}
         />
@@ -88,6 +90,7 @@ export default function TradingTab({
           cities={cities}
           tradeGoods={tradeGoods}
           latestCity={latestCity}
+          latestCoordinate={latestCoordinate}
           run={run}
           api={api}
         />

@@ -1136,6 +1136,8 @@ export default function App() {
     await refreshStatus();
   };
 
+  const latestCoordinate = coordinates[coordinates.length - 1] || null;
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -1225,6 +1227,7 @@ export default function App() {
             cities={cities}
             tradeGoods={tradeGoods}
             latestCity={latestCity}
+            latestCoordinate={latestCoordinate}
             run={run}
             api={api}
             refreshCatalogs={refreshCatalogs}

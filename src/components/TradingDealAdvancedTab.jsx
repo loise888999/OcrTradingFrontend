@@ -15,9 +15,12 @@ import SortableTable from './SortableTable.jsx';
 import MultiSelectChips from './MultiSelectChips.jsx';
 import {
   PriceAgeBadge,
+  TradingOriginSelector,
   formatDate,
+  getCityDistanceFromOrigin,
   getCurrentCityInfo,
   numberValue,
+  resolveTradingOrigin,
   uniqueSorted
 } from './tradingUtils.jsx';
 
@@ -29,6 +32,17 @@ function pickBestRoute(routes) {
 function pickBestMultiRoute(routes) {
   return [...routes]
     .sort((a, b) => numberValue(b.totalProfit) - numberValue(a.totalProfit))[0] || null;
+}
+
+function addRouteDistance(row, cities, origin) {
+  const distanceInfo = getCityDistanceFromOrigin(cities, row.buyCity, origin);
+
+  return {
+    ...row,
+    buyDistance: distanceInfo.distance,
+    buyDistanceSort: distanceInfo.distanceSort,
+    buyDistanceLabel: distanceInfo.distanceLabel
+  };
 }
 
 function profitLabel(value) {
@@ -113,7 +127,7 @@ const tradeStyles = [
   }
 ];
 
-export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity, run, api }) {
+export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity, latestCoordinate, run, api }) {
   const [mode, setMode] = useState('simple');
 
   const [simpleRegions, setSimpleRegions] = useState([]);
@@ -131,11 +145,22 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
   const [multiRoutes, setMultiRoutes] = useState([]);
   const [buyRegions, setBuyRegions] = useState([]);
   const [sellRegions, setSellRegions] = useState([]);
+  const [originCityName, setOriginCityName] = useState('');
   const [lastLoadedAt, setLastLoadedAt] = useState(null);
 
   const currentCityInfo = useMemo(
     () => getCurrentCityInfo(cities, latestCity),
     [cities, latestCity]
+  );
+
+  const origin = useMemo(
+    () => resolveTradingOrigin({
+      cities,
+      latestCity,
+      latestCoordinate,
+      manualCityName: originCityName
+    }),
+    [cities, latestCity, latestCoordinate, originCityName]
   );
 
   const options = useMemo(() => {
@@ -154,8 +179,18 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     };
   }, [cities, tradeGoods, filters.mainRegion]);
 
-  const bestRoute = useMemo(() => pickBestRoute(routes), [routes]);
-  const bestMultiRoute = useMemo(() => pickBestMultiRoute(multiRoutes), [multiRoutes]);
+  const displayRoutes = useMemo(
+    () => routes.map((route) => addRouteDistance(route, cities, origin)),
+    [routes, cities, origin]
+  );
+
+  const displayMultiRoutes = useMemo(
+    () => multiRoutes.map((route) => addRouteDistance(route, cities, origin)),
+    [multiRoutes, cities, origin]
+  );
+
+  const bestRoute = useMemo(() => pickBestRoute(displayRoutes), [displayRoutes]);
+  const bestMultiRoute = useMemo(() => pickBestMultiRoute(displayMultiRoutes), [displayMultiRoutes]);
 
   const simpleRegionSummary = useMemo(() => {
     if (simpleTradeStyle === 'between') {
@@ -297,6 +332,7 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     setFilters({ ...emptyFilters });
     setBuyRegions([]);
     setSellRegions([]);
+    setOriginCityName('');
     setShowDetails(false);
   };
 
@@ -393,6 +429,13 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
     { key: 'sellCity', label: 'Sell City', sortable: true },
     { key: 'sellPrice', label: 'Sell Price', sortable: true, defaultDirection: 'desc' },
     {
+      key: 'buyDistanceSort',
+      label: 'Distance',
+      sortable: true,
+      defaultDirection: 'asc',
+      render: (row) => row.buyDistanceLabel
+    },
+    {
       key: 'profit',
       label: 'Profit',
       sortable: true,
@@ -408,6 +451,13 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
   const multiColumns = [
     { key: 'buyCity', label: 'Buy City', sortable: true },
     { key: 'sellCity', label: 'Sell City', sortable: true },
+    {
+      key: 'buyDistanceSort',
+      label: 'Distance',
+      sortable: true,
+      defaultDirection: 'asc',
+      render: (row) => row.buyDistanceLabel
+    },
     { key: 'itemCount', label: 'Goods', sortable: true, defaultDirection: 'desc' },
     {
       key: 'totalProfit',
@@ -483,6 +533,16 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
               <MapPin size={16} />
               Current OCR city: {currentCityInfo.name || 'Unknown'}
             </span>
+
+            <span className="muted">Origin: {origin.label}</span>
+
+            <TradingOriginSelector
+              cities={cities}
+              manualCityName={originCityName}
+              onManualCityNameChange={setOriginCityName}
+              origin={origin}
+              datalistId="deal-origin-city-options"
+            />
 
             {currentCityInfo.city && (
               <>
@@ -872,6 +932,8 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
                 Profit: +{bestRoute.profit} <small>{profitLabel(bestRoute.profit)}</small>
               </span>
 
+              <span>Distance: {bestRoute.buyDistanceLabel}</span>
+
               <small>
                 Best single item route found with your selected trade area.
               </small>
@@ -897,6 +959,8 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
                 Total profit: +{bestMultiRoute.totalProfit}{' '}
                 <small>{profitLabel(bestMultiRoute.totalProfit)}</small>
               </span>
+
+              <span>Distance: {bestMultiRoute.buyDistanceLabel}</span>
 
               <div className="multi-route-items">
                 {(bestMultiRoute.items || []).slice(0, 6).map((item) => (
@@ -947,7 +1011,7 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
               <h3>Single-good trade routes</h3>
               <SortableTable
                 columns={routeColumns}
-                rows={routes}
+                rows={displayRoutes}
                 emptyMessage="No route results yet."
                 initialSortKey="profit"
                 initialDirection="desc"
@@ -960,7 +1024,7 @@ export default function TradingDealAdvancedTab({ cities, tradeGoods, latestCity,
               <h3>Multi-good route bonuses</h3>
               <SortableTable
                 columns={multiColumns}
-                rows={multiRoutes}
+                rows={displayMultiRoutes}
                 emptyMessage="No multi-good routes yet."
                 initialSortKey="totalProfit"
                 initialDirection="desc"

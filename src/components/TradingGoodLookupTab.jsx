@@ -13,23 +13,18 @@ import {
 import SortableTable from './SortableTable.jsx';
 import {
   PriceAgeBadge,
+  TradingOriginSelector,
   ageText,
+  distanceSortValue,
   formatDate,
+  getCityDistanceFromOrigin,
   freshnessTone,
   getCurrentCityInfo,
   isFreshEnough,
   numberValue,
+  resolveTradingOrigin,
   uniqueSorted
 } from './tradingUtils.jsx';
-
-function findCity(cities, cityName) {
-  if (!cityName) return null;
-
-  return (
-    cities.find((city) => String(city.name || '').toLowerCase() === String(cityName).toLowerCase()) ||
-    null
-  );
-}
 
 function getDistanceScore(row, referenceCity) {
   if (!referenceCity) return 9;
@@ -66,14 +61,19 @@ function DossierCard({ title, icon, children, empty }) {
   );
 }
 
-function normalizeOffer(row, tradeType, referenceCity) {
+function normalizeOffer(row, tradeType, origin, cities) {
   const price = numberValue(row.price);
+  const referenceCity = origin?.city || null;
   const distanceScore = getDistanceScore(row, referenceCity);
+  const distanceInfo = getCityDistanceFromOrigin(cities, row.city, origin);
 
   return {
     ...row,
     tradeType,
     price,
+    distance: distanceInfo.distance,
+    distanceSort: distanceInfo.distanceSort,
+    distanceWorldLabel: distanceInfo.distanceLabel,
     distanceScore,
     distanceLabel: getDistanceLabel(distanceScore)
   };
@@ -100,6 +100,9 @@ function pickClosestUseful(buyRows, sellRows) {
   ];
 
   return [...candidates].sort((a, b) => {
+    const coordinateDistanceDiff = distanceSortValue(a.distance) - distanceSortValue(b.distance);
+    if (coordinateDistanceDiff !== 0) return coordinateDistanceDiff;
+
     const distanceDiff = numberValue(a.distanceScore) - numberValue(b.distanceScore);
     if (distanceDiff !== 0) return distanceDiff;
 
@@ -183,9 +186,9 @@ const emptyFilters = {
   take: 500
 };
 
-export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, run, api }) {
+export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, latestCoordinate, run, api }) {
   const [filters, setFilters] = useState({ ...emptyFilters });
-  const [referenceCityName, setReferenceCityName] = useState('');
+  const [originCityName, setOriginCityName] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [onlyFreshPrices, setOnlyFreshPrices] = useState(false);
   const [buyRows, setBuyRows] = useState([]);
@@ -201,9 +204,14 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     [cities, latestCity]
   );
 
-  const referenceCity = useMemo(
-    () => findCity(cities, referenceCityName) || currentCityInfo.city,
-    [cities, referenceCityName, currentCityInfo.city]
+  const origin = useMemo(
+    () => resolveTradingOrigin({
+      cities,
+      latestCity,
+      latestCoordinate,
+      manualCityName: originCityName
+    }),
+    [cities, latestCity, latestCoordinate, originCityName]
   );
 
   const options = useMemo(() => {
@@ -254,7 +262,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
 
   const clear = () => {
     setFilters({ ...emptyFilters });
-    setReferenceCityName('');
+    setOriginCityName('');
     setOnlyFreshPrices(false);
     setBuyRows([]);
     setSellRows([]);
@@ -265,7 +273,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
   };
 
   const applyLocalFilters = (rows, tradeType) => {
-    let normalized = rows.map((row) => normalizeOffer(row, tradeType, referenceCity));
+    let normalized = rows.map((row) => normalizeOffer(row, tradeType, origin, cities));
 
     if (onlyFreshPrices) {
       normalized = normalized.filter((row) => isFreshEnough(row.capturedAtUtc));
@@ -277,7 +285,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
   useEffect(() => {
     setBuyRows(applyLocalFilters(rawBuyRows, 'Buy'));
     setSellRows(applyLocalFilters(rawSellRows, 'Sell'));
-  }, [rawBuyRows, rawSellRows, onlyFreshPrices, referenceCity]);
+  }, [rawBuyRows, rawSellRows, onlyFreshPrices, origin, cities]);
 
   const analyze = async () => {
     const item = filters.item.trim();
@@ -340,14 +348,23 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
     { key: 'subRegion', label: 'Sub Region', sortable: true },
     { key: 'seaTradeRegion', label: 'Sea Trade', sortable: true },
     {
-      key: 'distanceScore',
-      label: 'Closeness',
+      key: 'distanceSort',
+      label: 'Distance',
       sortable: true,
       defaultDirection: 'asc',
       render: (row) => (
         <span className={`closeness-pill closeness-${row.distanceScore}`}>
-          {row.distanceLabel}
+          {row.distanceWorldLabel}
         </span>
+      )
+    },
+    {
+      key: 'distanceScore',
+      label: 'Region',
+      sortable: true,
+      defaultDirection: 'asc',
+      render: (row) => (
+        <span className={`closeness-pill closeness-${row.distanceScore}`}>{row.distanceLabel}</span>
       )
     },
     {
@@ -401,11 +418,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               Current OCR city: {currentCityInfo.name || 'Unknown'}
             </span>
 
-            {referenceCity && (
-              <span className="muted">
-                Reference: {referenceCity.name} / {referenceCity.mainRegion || 'Unknown'}
-              </span>
-            )}
+            <span className="muted">Origin: {origin.label}</span>
           </div>
 
           <datalist id="dossier-good-options">
@@ -419,12 +432,6 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
           <datalist id="dossier-good-type-options">
             {options.types.map((goodType) => (
               <option key={goodType} value={goodType} />
-            ))}
-          </datalist>
-
-          <datalist id="dossier-city-options">
-            {options.cityNames.map((cityName) => (
-              <option key={cityName} value={cityName} />
             ))}
           </datalist>
 
@@ -458,16 +465,13 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               />
             </label>
 
-            <label className="field">
-              <span>Reference city</span>
-              <input
-                className="input"
-                list="dossier-city-options"
-                value={referenceCityName}
-                onChange={(event) => setReferenceCityName(event.target.value)}
-                placeholder={currentCityInfo.name ? `Current: ${currentCityInfo.name}` : 'Optional'}
-              />
-            </label>
+            <TradingOriginSelector
+              cities={cities}
+              manualCityName={originCityName}
+              onManualCityNameChange={setOriginCityName}
+              origin={origin}
+              datalistId="dossier-origin-city-options"
+            />
 
             <label className="field">
               <span>Limit</span>
@@ -544,7 +548,7 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               <p className="muted">
                 {filters.item ? `Good: ${filters.item}` : 'Choose a good to analyze'}
                 {' | '}
-                Reference: {referenceCity?.name || 'none'}
+                Origin: {origin.label}
                 {' | '}
                 Prices: {onlyFreshPrices ? 'fresh only' : 'all known'}
               </p>
@@ -649,10 +653,11 @@ export default function TradingGoodLookupTab({ cities, tradeGoods, latestCity, r
               <span>
                 {closestUseful.actionLabel} for {closestUseful.price}
               </span>
+              <span>{closestUseful.distanceWorldLabel}</span>
               <span className={`closeness-pill closeness-${closestUseful.distanceScore}`}>
                 {closestUseful.distanceLabel}
               </span>
-              <small>Reference: {referenceCity?.name || 'No reference city'}</small>
+              <small>Origin: {origin.label}</small>
             </>
           ) : (
             <>
