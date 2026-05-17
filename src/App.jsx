@@ -18,6 +18,7 @@ import TradingTab from './components/TradingTab.jsx';
 import SortableTable from './components/SortableTable.jsx';
 import WrappedCoordinateMap from './components/WrappedCoordinateMap.jsx';
 import CoordinateOcrSettingsPanel from './components/CoordinateOcrSettingsPanel.jsx';
+import PriceTradeTypeTemplateSettingsPanel from './components/PriceTradeTypeTemplateSettingsPanel.jsx';
 import DataSharingPanel from './components/DataSharingPanel.jsx';
 import MapEditorPanel from './components/MapEditorPanel.jsx';
 
@@ -726,12 +727,27 @@ function SettingsTab({
         >
           <Crosshair size={16} /> Coordinate OCR
         </button>
+        <button
+          type="button"
+          className={settingsSubtab === 'buy-sell-ocr' ? 'active' : ''}
+          onClick={() => setSettingsSubtab('buy-sell-ocr')}
+        >
+          <ShoppingCart size={16} /> Buy/Sell OCR
+        </button>
       </div>
 
       {settingsSubtab === 'coordinate-ocr' && (
         <Card>
           <div className="card-body">
             <CoordinateOcrSettingsPanel run={run} />
+          </div>
+        </Card>
+      )}
+
+      {settingsSubtab === 'buy-sell-ocr' && (
+        <Card>
+          <div className="card-body">
+            <PriceTradeTypeTemplateSettingsPanel run={run} />
           </div>
         </Card>
       )}

@@ -177,6 +177,41 @@ export const api = {
       method: 'POST'
     }),
 
+  getPriceTradeTypeTemplateStatus: () =>
+    request('/api/price-trade-type-template/profile/status'),
+
+  updatePriceTradeTypeTemplateSettings: (payload) =>
+    request('/api/settings/price-trade-type-template', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  startPriceTradeTypeTemplateAutoProfile: () =>
+    request('/api/price-trade-type-template/profile/auto/start', {
+      method: 'POST'
+    }),
+
+  stopPriceTradeTypeTemplateAutoProfile: () =>
+    request('/api/price-trade-type-template/profile/auto/stop', {
+      method: 'POST'
+    }),
+
+  deletePriceTradeTypeTemplateProfile: () =>
+    request('/api/price-trade-type-template/profile', {
+      method: 'DELETE'
+    }),
+
+  testPriceTradeTypeTemplateBox: (payload) =>
+    request('/api/price-trade-type-template/test-box', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  ocrDebugImageUrl: (debugImagePath) =>
+    `${getCurrentApiBase()}/api/ocr-debug-image?path=${encodeURIComponent(
+      String(debugImagePath || '').replaceAll('\\', '/')
+    )}`,
+
   // OCR controls
   startOcr: () =>
     request('/api/ocr/start', {

@@ -1022,6 +1022,42 @@ tr:last-child td {
   justify-content: flex-end;
 }
 
+.price-trade-type-helper-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.price-trade-type-helper-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: #ffffff;
+}
+
+.price-trade-type-preview {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.price-trade-type-preview img {
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+@media (max-width: 760px) {
+  .price-trade-type-helper-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .zone-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
