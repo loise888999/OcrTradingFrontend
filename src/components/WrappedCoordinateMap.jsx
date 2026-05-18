@@ -14,6 +14,9 @@ const DIRECTION_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
 const DEFAULT_MAP_SLOPE_OUTLIER_FILTER = 'balanced';
+const EXPECTED_PATH_AVERAGE_VECTOR_COUNT = 5;
+const EXPECTED_PATH_MIN_RECALCULATE_VECTORS = 3;
+const EXPECTED_PATH_RECALCULATE_DOT = 0.72;
 const SLOPE_OUTLIER_FILTERS = {
   balanced: {
     minSpikeDistance: 12,
@@ -294,6 +297,113 @@ function splitWrappedSegments(points, worldWidth) {
   }
 
   return segments.filter((segment) => segment.length >= 2);
+}
+
+function buildAverageTrailVector(trailPoints, worldWidth) {
+  const movingTrailPoints = getDistinctMovingCoordinates(trailPoints);
+
+  if (movingTrailPoints.length < 2) {
+    return {
+      vector: buildVector(0, 0),
+      pointCount: movingTrailPoints.length,
+      vectorCount: 0
+    };
+  }
+
+  const startIndex = Math.max(1, movingTrailPoints.length - EXPECTED_PATH_AVERAGE_VECTOR_COUNT);
+  let totalX = 0;
+  let totalY = 0;
+  let vectorCount = 0;
+
+  for (let index = startIndex; index < movingTrailPoints.length; index += 1) {
+    const vector = vectorFromPoints(movingTrailPoints[index - 1], movingTrailPoints[index], worldWidth);
+
+    if (!vector || vector.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+    const unitVector = normalizeVector(vector);
+    totalX += unitVector.x;
+    totalY += unitVector.y;
+    vectorCount += 1;
+  }
+
+  return {
+    vector: vectorCount > 0 ? buildVector(totalX / vectorCount, totalY / vectorCount) : buildVector(0, 0),
+    pointCount: movingTrailPoints.length,
+    vectorCount
+  };
+}
+
+function anchorDirectionLineAtPoint(line, currentPoint, worldWidth, worldHeight) {
+  if (!line) return null;
+
+  return buildDirectionLineFromHeading(
+    currentPoint,
+    line.velocityXPerStep,
+    line.velocityYPerStep,
+    worldWidth,
+    worldHeight
+  );
+}
+
+function buildExpectedTrailDirectionLine(
+  trailPoints,
+  currentPoint,
+  stableLine,
+  recalculatedLine,
+  worldWidth,
+  worldHeight
+) {
+  const averageTrail = buildAverageTrailVector(trailPoints, worldWidth);
+
+  if (!currentPoint || averageTrail.vectorCount < 1) {
+    return {
+      line: null,
+      pointCount: averageTrail.pointCount,
+      mode: 'waiting'
+    };
+  }
+
+  if (!stableLine) {
+    return {
+      line: buildDirectionLineFromHeading(
+        currentPoint,
+        averageTrail.vector.x,
+        averageTrail.vector.y,
+        worldWidth,
+        worldHeight
+      ),
+      pointCount: averageTrail.vectorCount + 1,
+      mode: `average ${averageTrail.vectorCount} trail vector${averageTrail.vectorCount === 1 ? '' : 's'}`
+    };
+  }
+
+  const stableVector = buildVector(stableLine.velocityXPerStep, stableLine.velocityYPerStep);
+  const directionAgreement = normalizedVectorDot(stableVector, averageTrail.vector);
+  const shouldRecalculate =
+    averageTrail.vectorCount >= EXPECTED_PATH_MIN_RECALCULATE_VECTORS &&
+    directionAgreement < EXPECTED_PATH_RECALCULATE_DOT;
+
+  if (shouldRecalculate) {
+    const recentLine = anchorDirectionLineAtPoint(recalculatedLine, currentPoint, worldWidth, worldHeight);
+
+    return {
+      line: recentLine || buildDirectionLineFromHeading(
+        currentPoint,
+        averageTrail.vector.x,
+        averageTrail.vector.y,
+        worldWidth,
+        worldHeight
+      ),
+      pointCount: averageTrail.vectorCount + 1,
+      mode: recentLine ? 'recalculated slope' : 'average correction'
+    };
+  }
+
+  return {
+    line: anchorDirectionLineAtPoint(stableLine, currentPoint, worldWidth, worldHeight),
+    pointCount: averageTrail.vectorCount + 1,
+    mode: `stable slope (${averageTrail.vectorCount} avg)`
+  };
 }
 
 function buildDirectionLineFromHeading(latestPoint, headingX, headingY, worldWidth, worldHeight) {
@@ -1202,6 +1312,7 @@ export default function WrappedCoordinateMap({
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
     [displayTrailCoordinates, worldWidth]
   );
+  const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
 
   const slopeOutlierFilter = normalizeMapSlopeOutlierFilter(mapSlopeOutlierFilter);
   const slopeCleanup = useMemo(
@@ -1209,7 +1320,7 @@ export default function WrappedCoordinateMap({
     [distinctDisplayMovingCoordinates, worldWidth, slopeOutlierFilter]
   );
 
-  const slopeFit = useMemo(
+  const stableDirection = useMemo(
     () => {
       const resetKey = [
         worldWidth,
@@ -1242,6 +1353,39 @@ export default function WrappedCoordinateMap({
       mapSlopePointCount
     ]
   );
+
+  const recalculatedDirection = useMemo(
+    () =>
+      buildRoundedDirectionLine(
+        slopeCleanup.points.slice(-(EXPECTED_PATH_AVERAGE_VECTOR_COUNT + 1)),
+        null,
+        worldWidth,
+        worldHeight,
+        EXPECTED_PATH_AVERAGE_VECTOR_COUNT,
+        `recent:${slopeCleanup.signature}`
+      ),
+    [slopeCleanup, worldHeight, worldWidth]
+  );
+
+  const expectedTrailDirection = useMemo(
+    () =>
+      buildExpectedTrailDirectionLine(
+        displayTrailCoordinates,
+        displayCurrent,
+        stableDirection.line,
+        recalculatedDirection.line,
+        worldWidth,
+        worldHeight
+      ),
+    [
+      displayCurrent,
+      displayTrailCoordinates,
+      stableDirection.line,
+      recalculatedDirection.line,
+      worldHeight,
+      worldWidth
+    ]
+  );
   const latestMovementKey = useMemo(() => {
     if (distinctDisplayMovingCoordinates.length < 2) return 'no-movement';
 
@@ -1251,11 +1395,9 @@ export default function WrappedCoordinateMap({
     return `${getPointKey(previous)}>${getPointKey(latest)}:${clampMapSlopePointCount(mapSlopePointCount)}`;
   }, [distinctDisplayMovingCoordinates, mapSlopePointCount]);
 
-  const slopeLine = slopeFit.line;
-  const slopeFitCount = slopeFit.pointCount;
-  const slopeCleanupActive = slopeCleanup.rejectedPointCount > 0 || slopeCleanup.rejectedVectorCount > 0;
-
-  const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
+  const slopeLine = expectedTrailDirection.line;
+  const expectedTrailPointCount = expectedTrailDirection.pointCount;
+  const expectedTrailMode = expectedTrailDirection.mode;
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
 
   const trailLineWidth = precisionMode
@@ -2113,15 +2255,8 @@ export default function WrappedCoordinateMap({
               Direction length: map height
             </span>
             <span className="map-info-row map-info-direction">
-              Slope direction: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
+              Expected path: {expectedTrailPointCount >= 2 ? expectedTrailMode : 'waiting for movement'}
             </span>
-            {slopeCleanupActive && (
-              <span className="map-info-row map-info-direction">
-                Direction cleanup: {slopeCleanup.cleanedVectorCount}/{slopeCleanup.originalVectorCount} vectors,
-                {' '}{slopeCleanup.rejectedPointCount} point{slopeCleanup.rejectedPointCount === 1 ? '' : 's'} removed,
-                {' '}{slopeCleanup.rejectedVectorCount} vector{slopeCleanup.rejectedVectorCount === 1 ? '' : 's'} removed
-              </span>
-            )}
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
             {showCityLayer && hasCityGoodSearch && (
