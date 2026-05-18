@@ -84,6 +84,39 @@ function normalizeStatus(value) {
   };
 }
 
+function normalizeSetupProof(value) {
+  if (!value) return null;
+
+  return {
+    capturedAtUtc: readSetting(value, 'capturedAtUtc') || '',
+    source: readSetting(value, 'source') || 'coordinate-template',
+    imageDataUrl: readSetting(value, 'imageDataUrl') || '',
+    imagePath: readSetting(value, 'imagePath') || '',
+    visibleCoordinate: readSetting(value, 'visibleCoordinate') || '',
+    normalOcrRawText: readSetting(value, 'normalOcrRawText') || '',
+    normalOcrParsedCoordinate: readSetting(value, 'normalOcrParsedCoordinate') || '',
+    fastTemplateRawText: readSetting(value, 'fastTemplateRawText') || readSetting(value, 'rawText') || '',
+    fastTemplateParsedCoordinate: readSetting(value, 'fastTemplateParsedCoordinate') || '',
+    fastTemplateSuccess: Boolean(readSetting(value, 'fastTemplateSuccess') ?? readSetting(value, 'success')),
+    fastTemplateReason: readSetting(value, 'fastTemplateReason') || readSetting(value, 'reason') || ''
+  };
+}
+
+function normalizeDigitPreview(value) {
+  return {
+    digit: String(readSetting(value, 'digit') || ''),
+    ready: Boolean(readSetting(value, 'ready')),
+    imageDataUrl: readSetting(value, 'imageDataUrl') || '',
+    imagePath: readSetting(value, 'imagePath') || '',
+    width: Number(readSetting(value, 'width') || 0),
+    height: Number(readSetting(value, 'height') || 0),
+    side: readSetting(value, 'side') || '',
+    distanceFromSeparator: Number(readSetting(value, 'distanceFromSeparator') || 0),
+    touchesCropEdge: Boolean(readSetting(value, 'touchesCropEdge')),
+    qualityScore: Number(readSetting(value, 'qualityScore') || 0)
+  };
+}
+
 function normalizeProfile(value) {
   const profile = value?.profile || value?.Profile || value || {};
 
@@ -108,6 +141,8 @@ function normalizeProfile(value) {
     lastSegmentationMode: readSetting(profile, 'lastSegmentationMode') || '',
     lastLowQualityDigits: readSetting(profile, 'lastLowQualityDigits') || [],
     lastCalibrationMessage: readSetting(profile, 'lastCalibrationMessage') || '',
+    lastSuccessfulSetupProof: normalizeSetupProof(readSetting(profile, 'lastSuccessfulSetupProof')),
+    digitTemplatePreviews: (readSetting(profile, 'digitTemplatePreviews') || []).map(normalizeDigitPreview),
     createdAtUtc: readSetting(profile, 'createdAtUtc') || '',
     updatedAtUtc: readSetting(profile, 'updatedAtUtc') || ''
   };
@@ -148,6 +183,7 @@ export default function CoordinateOcrSettingsPanel({ run }) {
   const [profile, setProfile] = useState(normalizeProfile(null));
   const [visibleCoordinate, setVisibleCoordinate] = useState('');
   const [profileMessage, setProfileMessage] = useState('');
+  const [testResult, setTestResult] = useState(null);
   const [savingKey, setSavingKey] = useState('');
 
   const load = useCallback(async () => {
@@ -215,9 +251,30 @@ export default function CoordinateOcrSettingsPanel({ run }) {
     setSavingKey('');
 
     if (saved) {
-      setProfile(normalizeProfile(saved));
+      const nextProfile = normalizeProfile(saved);
+      setProfile(nextProfile);
       setStatus(normalizeStatus(saved.runtime || saved.Runtime));
+      setTestResult(nextProfile.lastSuccessfulSetupProof);
       setProfileMessage(readSetting(saved, 'lastCalibrationMessage') || 'Fast coordinate profile created.');
+      await load();
+    }
+  };
+
+  const testCurrentBox = async () => {
+    setSavingKey('testCurrent');
+    setProfileMessage('');
+
+    const result = await run(
+      () => api.testCurrentCoordinateTemplate(),
+      'Could not test current coordinate box'
+    );
+
+    setSavingKey('');
+
+    if (result) {
+      setTestResult(normalizeSetupProof(result));
+      setStatus(normalizeStatus(result));
+      setProfile(normalizeProfile(result.profile || result.Profile));
       await load();
     }
   };
@@ -245,6 +302,10 @@ export default function CoordinateOcrSettingsPanel({ run }) {
   };
 
   const digitProgress = '0123456789'.split('');
+  const setupPreview = testResult || profile.lastSuccessfulSetupProof;
+  const digitPreviews = profile.digitTemplatePreviews.length
+    ? profile.digitTemplatePreviews
+    : digitProgress.map((digit) => ({ digit, ready: profile.learnedDigits.includes(digit) }));
 
   return (
     <div className="coordinate-ocr-settings-panel">
@@ -342,6 +403,15 @@ export default function CoordinateOcrSettingsPanel({ run }) {
 
           <button
             type="button"
+            className="button button-secondary"
+            disabled={savingKey === 'testCurrent'}
+            onClick={testCurrentBox}
+          >
+            <RefreshCw size={16} /> Test current box
+          </button>
+
+          <button
+            type="button"
             className="button button-primary"
             disabled={savingKey === 'createProfile'}
             onClick={createProfile}
@@ -361,6 +431,67 @@ export default function CoordinateOcrSettingsPanel({ run }) {
           <span>Templates: {profile.templateCount}</span>
           <span>Samples: {profile.sampleCount}</span>
           <span>Profile updated: {formatDate(profile.updatedAtUtc)}</span>
+        </div>
+
+        <div className="coordinate-template-proof">
+          <div className="coordinate-ocr-calibration-header">
+            <div>
+              <h4>Captured coordinate proof</h4>
+              <p className="muted">
+                {setupPreview
+                  ? `Saved ${formatDate(setupPreview.capturedAtUtc)} from ${setupPreview.source}.`
+                  : 'No saved coordinate setup proof yet.'}
+              </p>
+            </div>
+            <StatusPill ok={Boolean(setupPreview?.fastTemplateSuccess)}>
+              {setupPreview?.fastTemplateSuccess ? 'Fast read matched' : 'Needs proof'}
+            </StatusPill>
+          </div>
+
+          {setupPreview?.imageDataUrl && (
+            <div className="price-trade-type-preview">
+              <img src={setupPreview.imageDataUrl} alt="Coordinate OCR crop captured by backend" />
+            </div>
+          )}
+
+          <div className="coordinate-ocr-profile-meta">
+            <span>Visible: {setupPreview?.visibleCoordinate || 'None'}</span>
+            <span>Normal parsed: {setupPreview?.normalOcrParsedCoordinate || 'Unknown'}</span>
+            <span>Normal raw: {setupPreview?.normalOcrRawText || 'None'}</span>
+            <span>Fast parsed: {setupPreview?.fastTemplateParsedCoordinate || 'Unknown'}</span>
+            <span>Fast raw: {setupPreview?.fastTemplateRawText || 'None'}</span>
+            <span>Reason: {setupPreview?.fastTemplateReason || 'None'}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="coordinate-ocr-calibration-card">
+        <div className="coordinate-ocr-calibration-header">
+          <div>
+            <h4>Saved digit templates</h4>
+            <p className="muted">These are the 0-9 digit images saved in the backend profile.</p>
+          </div>
+          <StatusPill ok={profile.profileReady}>
+            {profile.profileReady ? 'All digits saved' : 'Digits missing'}
+          </StatusPill>
+        </div>
+
+        <div className="coordinate-template-grid">
+          {digitPreviews.map((digit) => (
+            <div className={`coordinate-template-tile ${digit.ready ? 'ready' : 'missing'}`} key={digit.digit}>
+              <strong>{digit.digit}</strong>
+              {digit.imageDataUrl ? (
+                <img src={digit.imageDataUrl} alt={`Saved coordinate digit ${digit.digit}`} />
+              ) : (
+                <span>Missing</span>
+              )}
+              <small>
+                {digit.ready
+                  ? `${digit.width || '?'}x${digit.height || '?'} q${Math.round(Number(digit.qualityScore || 0))}`
+                  : 'No template'}
+              </small>
+            </div>
+          ))}
         </div>
       </div>
 

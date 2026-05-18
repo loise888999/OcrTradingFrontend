@@ -58,6 +58,7 @@ function normalizeBoxTest(value) {
   if (!value) return null;
   return {
     region: readSetting(value, 'region') || '',
+    capturedAtUtc: readSetting(value, 'capturedAtUtc') || '',
     textVisible: Boolean(readSetting(value, 'textVisible')),
     contrast: Number(readSetting(value, 'contrast') || 0),
     edgePixelsPercent: Number(readSetting(value, 'edgePixelsPercent') || 0),
@@ -89,6 +90,8 @@ function normalizeProfile(value) {
     lastMessage: readSetting(profile, 'lastMessage') || '',
     autoProfileEnabled: Boolean(readSetting(profile, 'autoProfileEnabled')),
     updatedAtUtc: readSetting(profile, 'updatedAtUtc') || '',
+    lastSuccessfulBuySetupProof: normalizeBoxTest(readSetting(profile, 'lastSuccessfulBuySetupProof')),
+    lastSuccessfulSellSetupProof: normalizeBoxTest(readSetting(profile, 'lastSuccessfulSellSetupProof')),
     lastAttempts: readSetting(profile, 'lastAttempts') || []
   };
 }
@@ -186,7 +189,10 @@ export default function PriceTradeTypeTemplateSettingsPanel({ run }) {
 
     setSavingKey('');
 
-    if (deleted) await load();
+    if (deleted) {
+      setBoxTests({ Buy: null, Sell: null });
+      await load();
+    }
   };
 
   const testBox = async (region, learnIfNormalOcrMatches = false) => {
@@ -344,7 +350,10 @@ export default function PriceTradeTypeTemplateSettingsPanel({ run }) {
 
         <div className="price-trade-type-helper-grid">
           {['Buy', 'Sell'].map((region) => {
-            const result = boxTests[region];
+            const persisted = region === 'Buy'
+              ? profile.lastSuccessfulBuySetupProof
+              : profile.lastSuccessfulSellSetupProof;
+            const result = boxTests[region] || persisted;
             const normalMatches = result?.normalOcrDetectedTradeType === region;
             return (
               <div className="price-trade-type-helper-card" key={region}>
@@ -354,7 +363,7 @@ export default function PriceTradeTypeTemplateSettingsPanel({ run }) {
                     <p className="muted">
                       {result
                         ? `Setup OCR sees ${result.normalOcrDetectedTradeType}. Fast sees ${result.fastTemplateDetectedTradeType}.`
-                        : 'No setup capture yet.'}
+                        : 'No saved setup capture yet.'}
                     </p>
                   </div>
                   <StatusPill ok={Boolean(result && normalMatches)}>
@@ -375,6 +384,7 @@ export default function PriceTradeTypeTemplateSettingsPanel({ run }) {
                   <span>Fast score: {formatScore(result?.fastTemplateScore)}</span>
                   <span>Fast reason: {result?.fastTemplateReason || 'None'}</span>
                   <span>Learned: {result?.learnedTemplate ? 'Yes' : 'No'}</span>
+                  <span>Saved: {result?.capturedAtUtc ? formatDate(result.capturedAtUtc) : 'No'}</span>
                 </div>
 
                 <div className="coordinate-ocr-auto-actions">

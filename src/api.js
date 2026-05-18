@@ -161,6 +161,11 @@ export const api = {
   getCoordinateTemplateProfileStatus: () =>
     request('/api/coordinate-template/profile/status'),
 
+  testCurrentCoordinateTemplate: () =>
+    request('/api/coordinate-template/test-current', {
+      method: 'POST'
+    }),
+
   createCoordinateTemplateProfile: (payload) =>
     request('/api/coordinate-template/profile', {
       method: 'POST',
