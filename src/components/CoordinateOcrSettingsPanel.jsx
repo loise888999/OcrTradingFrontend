@@ -14,7 +14,8 @@ const DEFAULT_SETTINGS = {
   coordinateTemplateAutoProfileOnlyWhenNormalOcrMode: true,
   coordinateTemplateAutoProfileMaxSamples: 200,
   coordinateTemplateAutoProfileValidationMaxDigitScore: 0.18,
-  coordinateTemplateMaxTemplatesPerDigit: 5
+  coordinateTemplateMaxTemplatesPerDigit: 5,
+  coordinateTemplateBrightnessThreshold: 180
 };
 
 function readSetting(source, key) {
@@ -69,6 +70,10 @@ function normalizeSettings(value) {
     coordinateTemplateMaxTemplatesPerDigit: Number(
       readSetting(value, 'coordinateTemplateMaxTemplatesPerDigit') ??
         DEFAULT_SETTINGS.coordinateTemplateMaxTemplatesPerDigit
+    ),
+    coordinateTemplateBrightnessThreshold: Number(
+      readSetting(value, 'coordinateTemplateBrightnessThreshold') ??
+        DEFAULT_SETTINGS.coordinateTemplateBrightnessThreshold
     )
   };
 }
@@ -123,6 +128,7 @@ function normalizeProfile(value) {
   return {
     profileReady: Boolean(readSetting(profile, 'profileReady')),
     profileId: readSetting(profile, 'profileId') || '',
+    brightnessWhiteThreshold: Number(readSetting(profile, 'brightnessWhiteThreshold') ?? 180),
     learnedDigits: readSetting(profile, 'learnedDigits') || [],
     missingDigitTemplates: readSetting(profile, 'missingDigitTemplates') || [],
     templateCount: Number(readSetting(profile, 'templateCount') || 0),
@@ -306,6 +312,9 @@ export default function CoordinateOcrSettingsPanel({ run }) {
   const digitPreviews = profile.digitTemplatePreviews.length
     ? profile.digitTemplatePreviews
     : digitProgress.map((digit) => ({ digit, ready: profile.learnedDigits.includes(digit) }));
+  const thresholdMismatch =
+    Boolean(profile.profileId) &&
+    profile.brightnessWhiteThreshold !== settings.coordinateTemplateBrightnessThreshold;
 
   return (
     <div className="coordinate-ocr-settings-panel">
@@ -338,6 +347,7 @@ export default function CoordinateOcrSettingsPanel({ run }) {
           {statusTone}
         </StatusPill>
         <span>Profile: {profile.profileReady ? `${profile.templateCount} templates` : 'Missing'}</span>
+        <span>Fast threshold: {settings.coordinateTemplateBrightnessThreshold}</span>
         <span>Failed reads: {status.failedReadCount}</span>
         <span>Updated: {formatDate(status.updatedAtUtc)}</span>
       </div>
@@ -345,6 +355,12 @@ export default function CoordinateOcrSettingsPanel({ run }) {
       {status.lastFailureReason && (
         <div className="coordinate-ocr-message">
           {status.lastFailureReason}
+        </div>
+      )}
+
+      {thresholdMismatch && (
+        <div className="coordinate-ocr-message">
+          Profile was learned with threshold {profile.brightnessWhiteThreshold}; current fast digit threshold is {settings.coordinateTemplateBrightnessThreshold}. Recreate or relearn profile if fast reads worsen.
         </div>
       )}
 
@@ -429,6 +445,7 @@ export default function CoordinateOcrSettingsPanel({ run }) {
         <div className="coordinate-ocr-profile-meta">
           <span>Missing digits: {profile.missingDigitTemplates.length ? profile.missingDigitTemplates.join(', ') : 'None'}</span>
           <span>Templates: {profile.templateCount}</span>
+          <span>Learned threshold: {profile.brightnessWhiteThreshold}</span>
           <span>Samples: {profile.sampleCount}</span>
           <span>Profile updated: {formatDate(profile.updatedAtUtc)}</span>
         </div>
@@ -660,6 +677,21 @@ export default function CoordinateOcrSettingsPanel({ run }) {
               savePatch('coordinateTemplateMinContrast', Number(event.target.value || 0))
             }
           />
+        </label>
+
+        <label className="field">
+          <span>Fast digit threshold</span>
+          <input
+            className="input"
+            type="number"
+            min="0"
+            max="255"
+            value={settings.coordinateTemplateBrightnessThreshold}
+            onChange={(event) =>
+              savePatch('coordinateTemplateBrightnessThreshold', Number(event.target.value || 0))
+            }
+          />
+          <small>Lower accepts darker pixels; higher requires brighter pixels.</small>
         </label>
 
         <label className="field">

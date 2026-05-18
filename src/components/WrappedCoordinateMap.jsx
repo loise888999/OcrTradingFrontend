@@ -1002,6 +1002,9 @@ export default function WrappedCoordinateMap({
   waypointOffsetY,
   mapSlopePointCount = DEFAULT_MAP_SLOPE_POINT_COUNT,
   mapSlopeOutlierFilter = DEFAULT_MAP_SLOPE_OUTLIER_FILTER,
+  markerCoordinate = null,
+  onMarkerCoordinateChange,
+  isActive = true,
   refreshCoordinates
 }) {
   const [zoom, setZoom] = useState(0.075);
@@ -1016,7 +1019,6 @@ export default function WrappedCoordinateMap({
   const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
   const [showMapInfo, setShowMapInfo] = useState(true);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
-  const [markerCoordinate, setMarkerCoordinate] = useState(null);
   const [markerInput, setMarkerInput] = useState({ x: '', y: '' });
 
   const [precisionMode, setPrecisionMode] = useState(false);
@@ -1045,6 +1047,18 @@ export default function WrappedCoordinateMap({
   }, [pan]);
 
   useEffect(() => {
+    if (!markerCoordinate) {
+      setMarkerInput({ x: '', y: '' });
+      return;
+    }
+
+    setMarkerInput({
+      x: String(markerCoordinate.x),
+      y: String(markerCoordinate.y)
+    });
+  }, [markerCoordinate]);
+
+  useEffect(() => {
     if (!showCityLayer) {
       setSelectedCityName('');
       setCityGoodSearch('');
@@ -1052,7 +1066,7 @@ export default function WrappedCoordinateMap({
   }, [showCityLayer]);
 
   useEffect(() => {
-    if (!isFullBrowserMap) return undefined;
+    if (!isFullBrowserMap || !isActive) return undefined;
 
     document.body.classList.add('map-full-browser-active');
     setShowGoodSearchSettings(true);
@@ -1069,7 +1083,7 @@ export default function WrappedCoordinateMap({
       document.body.classList.remove('map-full-browser-active');
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isFullBrowserMap]);
+  }, [isFullBrowserMap, isActive]);
 
   const orderedCoordinates = useMemo(
     () => [...coordinates].sort(compareCoordinatePoints),
@@ -1477,10 +1491,10 @@ export default function WrappedCoordinateMap({
       const y = Math.round(clampY(coordinate.y, worldHeight));
       const next = { x, y };
 
-      setMarkerCoordinate(next);
+      onMarkerCoordinateChange?.(next);
       setMarkerInput({ x: String(x), y: String(y) });
     },
-    [worldHeight, worldWidth]
+    [onMarkerCoordinateChange, worldHeight, worldWidth]
   );
 
   const updateMarkerInput = (field, value) => {
@@ -1490,7 +1504,7 @@ export default function WrappedCoordinateMap({
       const y = Number(nextInput.y);
 
       if (nextInput.x !== '' && nextInput.y !== '' && Number.isFinite(x) && Number.isFinite(y)) {
-        setMarkerCoordinate({
+        onMarkerCoordinateChange?.({
           x: Math.round(normalizeX(x, worldWidth)),
           y: Math.round(clampY(y, worldHeight))
         });
@@ -1999,7 +2013,7 @@ export default function WrappedCoordinateMap({
               <Button
                 className="map-compact-button"
                 onClick={() => {
-                  setMarkerCoordinate(null);
+                  onMarkerCoordinateChange?.(null);
                   setMarkerInput({ x: '', y: '' });
                 }}
                 disabled={!markerCoordinate}

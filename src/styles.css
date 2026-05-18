@@ -343,6 +343,119 @@ body {
   font-size: 14px;
 }
 
+.floating-note-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.floating-note-settings-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.floating-note {
+  position: fixed;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  min-height: 160px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 20px 55px rgba(15, 23, 42, 0.28);
+  overflow: hidden;
+}
+
+.floating-note-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 5px 6px 5px 9px;
+  background: #0f172a;
+  color: #ffffff;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.floating-note-header:active {
+  cursor: grabbing;
+}
+
+.floating-note-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.floating-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.floating-note-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.floating-note-icon-button:hover,
+.floating-note-icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.22);
+  outline: none;
+}
+
+.floating-note-textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  padding: 10px 12px 16px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+}
+
+.floating-note-textarea:focus {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.22);
+}
+
+.floating-note-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background:
+    linear-gradient(135deg, transparent 52%, rgba(37, 99, 235, 0.38) 52%),
+    transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
 .success-info,
 .warning-info,
 .danger-info {
@@ -528,7 +641,7 @@ tr:last-child td {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: 11000;
   display: grid;
   place-items: center;
   padding: 18px;

@@ -3,11 +3,15 @@ import {
   AlertCircle,
   CheckCircle2,
   Crosshair,
+  Eye,
+  EyeOff,
   Map,
   RefreshCw,
+  RotateCcw,
   Settings,
   ShoppingCart,
   SlidersHorizontal,
+  StickyNote,
   Trash2,
   TrendingUp
 } from 'lucide-react';
@@ -21,6 +25,12 @@ import CoordinateOcrSettingsPanel from './components/CoordinateOcrSettingsPanel.
 import PriceTradeTypeTemplateSettingsPanel from './components/PriceTradeTypeTemplateSettingsPanel.jsx';
 import DataSharingPanel from './components/DataSharingPanel.jsx';
 import MapEditorPanel from './components/MapEditorPanel.jsx';
+import FloatingNote, {
+  FLOATING_NOTE_SETTING_KEY,
+  createDefaultFloatingNoteState,
+  normalizeFloatingNoteState,
+  resetFloatingNoteLayout
+} from './components/FloatingNote.jsx';
 
 const DEFAULT_WORLD_WIDTH = 16384;
 const DEFAULT_WORLD_HEIGHT = 8192;
@@ -669,6 +679,8 @@ function SettingsTab({
   settings,
   saveSetting,
   setSettings,
+  floatingNoteState,
+  updateFloatingNoteState,
   run,
   refreshPrices,
   refreshCatalogs,
@@ -686,6 +698,19 @@ function SettingsTab({
       key,
       value: String(value)
     });
+  };
+
+  const toggleFloatingNote = () => {
+    updateFloatingNoteState({ visible: !floatingNoteState.visible });
+  };
+
+  const resetFloatingNote = () => {
+    updateFloatingNoteState((current) =>
+      resetFloatingNoteLayout({
+        ...current,
+        visible: true
+      })
+    );
   };
 
   return (
@@ -773,6 +798,33 @@ function SettingsTab({
       />
 
       <div className="settings-grid">
+        <Card>
+          <div className="card-body">
+            <h3>
+              <StickyNote size={20} /> Floating note
+            </h3>
+
+            <div className="floating-note-settings-actions">
+              <Button
+                variant={floatingNoteState.visible ? 'secondary' : 'primary'}
+                onClick={toggleFloatingNote}
+              >
+                {floatingNoteState.visible ? <EyeOff size={16} /> : <Eye size={16} />}
+                {floatingNoteState.visible ? 'Hide note' : 'Show note'}
+              </Button>
+
+              <Button variant="secondary" onClick={resetFloatingNote}>
+                <RotateCcw size={16} /> Reset layout
+              </Button>
+            </div>
+
+            <div className="mini-info floating-note-settings-status">
+              <strong>{floatingNoteState.visible ? 'Visible' : 'Hidden'}</strong>
+              <span>{floatingNoteState.text.length.toLocaleString()} chars</span>
+            </div>
+          </div>
+        </Card>
+
         <Card>
           <div className="card-body">
             <h3>
@@ -921,11 +973,13 @@ export default function App() {
   const [prices, setPrices] = useState([]);
   const [cities, setCities] = useState([]);
   const [tradeGoods, setTradeGoods] = useState([]);
+  const [mapMarkerCoordinate, setMapMarkerCoordinate] = useState(null);
   const [error, setError] = useState('');
   const [coordinateStreamStatus, setCoordinateStreamStatus] = useState('connecting');
   const coordinateStreamConnectedRef = useRef(false);
   const coordinateFallbackRefreshStartedRef = useRef(false);
   const lastCoordinateUpdateAtRef = useRef(0);
+  const floatingNoteLastSavedRef = useRef('');
 
   const [settings, setSettings] = useState({
     worldWidth: DEFAULT_WORLD_WIDTH,
@@ -938,6 +992,23 @@ export default function App() {
     mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT,
     mapSlopeOutlierFilter: DEFAULT_MAP_SLOPE_OUTLIER_FILTER
   });
+  const [floatingNoteState, setFloatingNoteState] = useState(() =>
+    createDefaultFloatingNoteState()
+  );
+  const [floatingNoteLoaded, setFloatingNoteLoaded] = useState(false);
+
+  const updateFloatingNoteState = useCallback((updater) => {
+    setFloatingNoteState((current) => {
+      const raw = typeof updater === 'function'
+        ? updater(current)
+        : {
+            ...current,
+            ...updater
+          };
+
+      return normalizeFloatingNoteState(raw, current);
+    });
+  }, []);
 
   const run = useCallback(async (fn, fallbackMessage = 'Request failed') => {
     try {
@@ -1064,6 +1135,16 @@ export default function App() {
     const data = await run(() => api.getSettings(), 'Could not load settings');
 
     if (data?.settings) {
+      setFloatingNoteState((current) => {
+        const next = normalizeFloatingNoteState(
+          data.settings[FLOATING_NOTE_SETTING_KEY],
+          current
+        );
+        floatingNoteLastSavedRef.current = JSON.stringify(next);
+        return next;
+      });
+      setFloatingNoteLoaded(true);
+
       setSettings((current) => ({
         ...current,
         worldWidth: Number(data.settings.worldWidth ?? current.worldWidth),
@@ -1122,9 +1203,30 @@ export default function App() {
     return () => clearInterval(timer);
   }, [refreshAll, refreshStatus, refreshCoordinates, refreshPrices, settings.ocrInterval]);
 
-  const saveSetting = async (setting) => {
-    await run(() => api.saveSetting(setting), 'Could not save setting');
-  };
+  const saveSetting = useCallback(
+    (setting) => run(() => api.saveSetting(setting), 'Could not save setting'),
+    [run]
+  );
+
+  useEffect(() => {
+    if (!floatingNoteLoaded) return undefined;
+
+    const serialized = JSON.stringify(floatingNoteState);
+    if (serialized === floatingNoteLastSavedRef.current) return undefined;
+
+    const timer = setTimeout(async () => {
+      const saved = await saveSetting({
+        key: FLOATING_NOTE_SETTING_KEY,
+        value: serialized
+      });
+
+      if (saved) {
+        floatingNoteLastSavedRef.current = serialized;
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [floatingNoteLoaded, floatingNoteState, saveSetting]);
 
   const startOcr = async () => {
     await run(() => api.startOcr(), 'Could not start OCR');
@@ -1195,7 +1297,7 @@ export default function App() {
       </nav>
 
       <main>
-        {activeTab === 'map' && (
+        <section hidden={activeTab !== 'map'}>
           <WrappedCoordinateMap
             coordinates={coordinates}
             coordinateStreamStatus={coordinateStreamStatus}
@@ -1210,9 +1312,12 @@ export default function App() {
             waypointOffsetY={settings.waypointOffsetY}
             mapSlopePointCount={settings.mapSlopePointCount}
             mapSlopeOutlierFilter={settings.mapSlopeOutlierFilter}
+            markerCoordinate={mapMarkerCoordinate}
+            onMarkerCoordinateChange={setMapMarkerCoordinate}
+            isActive={activeTab === 'map'}
             refreshCoordinates={refreshCoordinates}
           />
-        )}
+        </section>
 
         {activeTab === 'prices' && (
           <PricesTab
@@ -1239,6 +1344,8 @@ export default function App() {
             settings={settings}
             setSettings={setSettings}
             saveSetting={saveSetting}
+            floatingNoteState={floatingNoteState}
+            updateFloatingNoteState={updateFloatingNoteState}
             run={run}
             refreshPrices={refreshPrices}
             refreshCatalogs={refreshCatalogs}
@@ -1246,6 +1353,11 @@ export default function App() {
           />
         )}
       </main>
+
+      <FloatingNote
+        note={floatingNoteState}
+        onChange={updateFloatingNoteState}
+      />
     </div>
   );
 }
