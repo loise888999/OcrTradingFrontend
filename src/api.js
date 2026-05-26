@@ -495,6 +495,29 @@ export const api = {
       })
     ),
 
+  getNanbanMarketRates: ({
+    sourceMarket = '',
+    tradeGood = '',
+    category = '',
+    sellArea = '',
+    marketSignal = '',
+    minPrice = '',
+    maxPrice = '',
+    take = 1000
+  } = {}) =>
+    request(
+      withQuery('/api/trading/nanban-market-rates', {
+        sourceMarket,
+        tradeGood,
+        category,
+        sellArea,
+        marketSignal,
+        minPrice,
+        maxPrice,
+        take
+      })
+    ),
+
   getAdvancedRoutes: ({
     item = '',
     type = '',

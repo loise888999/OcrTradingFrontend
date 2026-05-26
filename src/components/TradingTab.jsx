@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Factory, Hammer, Landmark, PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
+import { Anchor, Factory, Hammer, Landmark, PackagePlus, PackageSearch, TrendingUp } from 'lucide-react';
 import TradingGoodLookupTab from './TradingGoodLookupTab.jsx';
 import TradingDealAdvancedTab from './TradingDealAdvancedTab.jsx';
 import TradingOtherTab from './TradingOtherTab.jsx';
 import TradingSpecialCraftTab from './TradingSpecialCraftTab.jsx';
 import TradingNpcCraftingTab from './TradingNpcCraftingTab.jsx';
 import TradingFlorenceContributionTab from './TradingFlorenceContributionTab.jsx';
+import TradingNanbanTradeTab from './TradingNanbanTradeTab.jsx';
 
 export default function TradingTab({
   cities,
@@ -37,6 +38,14 @@ export default function TradingTab({
               onClick={() => setActiveSubTab('deals')}
             >
               <TrendingUp size={17} /> Deal helper
+            </button>
+
+            <button
+              type="button"
+              className={activeSubTab === 'nanbanTrade' ? 'active' : ''}
+              onClick={() => setActiveSubTab('nanbanTrade')}
+            >
+              <Anchor size={17} /> Nanban Trade
             </button>
 
             <button
@@ -91,6 +100,13 @@ export default function TradingTab({
           tradeGoods={tradeGoods}
           latestCity={latestCity}
           latestCoordinate={latestCoordinate}
+          run={run}
+          api={api}
+        />
+      )}
+
+      {activeSubTab === 'nanbanTrade' && (
+        <TradingNanbanTradeTab
           run={run}
           api={api}
         />
