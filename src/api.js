@@ -161,6 +161,11 @@ export const api = {
   getCoordinateTemplateProfileStatus: () =>
     request('/api/coordinate-template/profile/status'),
 
+  testCurrentCoordinateTemplate: () =>
+    request('/api/coordinate-template/test-current', {
+      method: 'POST'
+    }),
+
   createCoordinateTemplateProfile: (payload) =>
     request('/api/coordinate-template/profile', {
       method: 'POST',
@@ -176,6 +181,41 @@ export const api = {
     request('/api/coordinate-template/profile/auto/stop', {
       method: 'POST'
     }),
+
+  getPriceTradeTypeTemplateStatus: () =>
+    request('/api/price-trade-type-template/profile/status'),
+
+  updatePriceTradeTypeTemplateSettings: (payload) =>
+    request('/api/settings/price-trade-type-template', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  startPriceTradeTypeTemplateAutoProfile: () =>
+    request('/api/price-trade-type-template/profile/auto/start', {
+      method: 'POST'
+    }),
+
+  stopPriceTradeTypeTemplateAutoProfile: () =>
+    request('/api/price-trade-type-template/profile/auto/stop', {
+      method: 'POST'
+    }),
+
+  deletePriceTradeTypeTemplateProfile: () =>
+    request('/api/price-trade-type-template/profile', {
+      method: 'DELETE'
+    }),
+
+  testPriceTradeTypeTemplateBox: (payload) =>
+    request('/api/price-trade-type-template/test-box', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  ocrDebugImageUrl: (debugImagePath) =>
+    `${getCurrentApiBase()}/api/ocr-debug-image?path=${encodeURIComponent(
+      String(debugImagePath || '').replaceAll('\\', '/')
+    )}`,
 
   // OCR controls
   startOcr: () =>
@@ -193,6 +233,9 @@ export const api = {
   // OCR results
   getLatestCoordinates: ({ take = 20 } = {}) =>
     request(withQuery('/api/coordinates/latest', { take })),
+
+  getNavigationSpeed: () => request('/api/navigation/speed'),
+
   streamCoordinates: async ({
     history = 20,
     onCoordinate,
@@ -395,6 +438,7 @@ export const api = {
     item = '',
     type = '',
     bonus = '',
+    minBonusValue = '',
     material = '',
     location = '',
     take = 500
@@ -404,6 +448,7 @@ export const api = {
         item,
         type,
         bonus,
+        minBonusValue,
         material,
         location,
         take
@@ -446,6 +491,29 @@ export const api = {
         skill,
         confidence,
         source,
+        take
+      })
+    ),
+
+  getNanbanMarketRates: ({
+    sourceMarket = '',
+    tradeGood = '',
+    category = '',
+    sellArea = '',
+    marketSignal = '',
+    minPrice = '',
+    maxPrice = '',
+    take = 1000
+  } = {}) =>
+    request(
+      withQuery('/api/trading/nanban-market-rates', {
+        sourceMarket,
+        tradeGood,
+        category,
+        sellArea,
+        marketSignal,
+        minPrice,
+        maxPrice,
         take
       })
     ),

@@ -6,6 +6,7 @@ const emptyFilters = {
   item: '',
   type: '',
   bonus: '',
+  minBonusValue: '',
   material: '',
   location: '',
   take: 500
@@ -257,7 +258,19 @@ export default function TradingSpecialCraftTab({ run, api }) {
                 className="input"
                 value={filters.bonus}
                 onChange={(event) => update('bonus', event.target.value)}
-                placeholder="Defense, Sewing..."
+                placeholder="Attack, Defense, Sewing..."
+              />
+            </label>
+
+            <label className="field">
+              <span>Minimum stat value</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                value={filters.minBonusValue}
+                onChange={(event) => update('minBonusValue', event.target.value)}
+                placeholder="35"
               />
             </label>
 

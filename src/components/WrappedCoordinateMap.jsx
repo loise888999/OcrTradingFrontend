@@ -13,6 +13,45 @@ const DIRECTION_DISTANCE_PER_SLOPE_POINT = 18;
 const DIRECTION_REPLAY_POINT_LIMIT = 500;
 const CITY_CLICK_MOVE_THRESHOLD_PX = 5;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
+const DEFAULT_MAP_SLOPE_OUTLIER_FILTER = 'balanced';
+const EXPECTED_PATH_AVERAGE_VECTOR_COUNT = 5;
+const EXPECTED_PATH_MIN_RECALCULATE_VECTORS = 3;
+const EXPECTED_PATH_RECALCULATE_DOT = 0.72;
+const ROUTE_TRIGGER_ANCHOR_MS = 20 * 1000;
+const ROUTE_TRIGGER_VALIDATE_MS = 10 * 1000;
+const ROUTE_TRIGGER_BUCKET_HALF_MS = 2 * 1000;
+const ROUTE_TRIGGER_NOW_WINDOW_MS = 2 * 1000;
+const ROUTE_TRIGGER_RECHECK_MS = 10 * 1000;
+const ROUTE_TRIGGER_MIN_DISTANCE = 8;
+const ROUTE_TRIGGER_MIN_TOLERANCE = 1;
+const ROUTE_TRIGGER_MAX_TOLERANCE = 6;
+const ROUTE_TRIGGER_TOLERANCE_STEP_MULTIPLIER = 0.2;
+const ROUTE_TRIGGER_FAILURE_WINDOW = 3;
+const ROUTE_TRIGGER_FAILURES_TO_RECALCULATE = 2;
+const SLOPE_OUTLIER_FILTERS = {
+  balanced: {
+    minSpikeDistance: 12,
+    spikeLengthMultiplier: 3,
+    spikeOppositionDot: -0.65,
+    directDistanceMultiplier: 2.25,
+    directDistanceRatio: 0.35,
+    segmentMinDistance: 18,
+    segmentLengthMultiplier: 4,
+    segmentAgreeDot: 0.78,
+    segmentDisagreeDot: -0.45
+  },
+  strict: {
+    minSpikeDistance: 7,
+    spikeLengthMultiplier: 2.2,
+    spikeOppositionDot: -0.45,
+    directDistanceMultiplier: 3,
+    directDistanceRatio: 0.55,
+    segmentMinDistance: 12,
+    segmentLengthMultiplier: 3,
+    segmentAgreeDot: 0.65,
+    segmentDisagreeDot: -0.25
+  }
+};
 
 function normalizeX(value, width) {
   let normalized = Number(value || 0) % width;
@@ -54,6 +93,13 @@ function clampMapSlopePointCount(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
   return Math.max(3, Math.min(25, Math.round(parsed)));
+}
+
+function normalizeMapSlopeOutlierFilter(value) {
+  const normalized = String(value || DEFAULT_MAP_SLOPE_OUTLIER_FILTER).trim().toLowerCase();
+  return normalized === 'off' || normalized === 'balanced' || normalized === 'strict'
+    ? normalized
+    : DEFAULT_MAP_SLOPE_OUTLIER_FILTER;
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -198,6 +244,11 @@ function calculateCoordinateSpeed(points, worldWidth, windowSeconds = 4) {
   return elapsedSeconds > 0 ? totalDistance / elapsedSeconds : 0;
 }
 
+function getBackendSpeedKnots(point) {
+  const value = Number(point?.speedKnots ?? point?.SpeedKnots);
+  return Number.isFinite(value) ? value : null;
+}
+
 function getPointKey(point, index = 0) {
   const timestamp =
     point?.capturedAtUtc ||
@@ -259,6 +310,122 @@ function splitWrappedSegments(points, worldWidth) {
   return segments.filter((segment) => segment.length >= 2);
 }
 
+function buildAverageTrailVector(trailPoints, worldWidth) {
+  const movingTrailPoints = getDistinctMovingCoordinates(trailPoints);
+
+  if (movingTrailPoints.length < 2) {
+    return {
+      vector: buildVector(0, 0),
+      pointCount: movingTrailPoints.length,
+      vectorCount: 0
+    };
+  }
+
+  const startIndex = Math.max(1, movingTrailPoints.length - EXPECTED_PATH_AVERAGE_VECTOR_COUNT);
+  let totalX = 0;
+  let totalY = 0;
+  let vectorCount = 0;
+
+  for (let index = startIndex; index < movingTrailPoints.length; index += 1) {
+    const vector = vectorFromPoints(movingTrailPoints[index - 1], movingTrailPoints[index], worldWidth);
+
+    if (!vector || vector.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+    const unitVector = normalizeVector(vector);
+    totalX += unitVector.x;
+    totalY += unitVector.y;
+    vectorCount += 1;
+  }
+
+  return {
+    vector: vectorCount > 0 ? buildVector(totalX / vectorCount, totalY / vectorCount) : buildVector(0, 0),
+    pointCount: movingTrailPoints.length,
+    vectorCount
+  };
+}
+
+function anchorDirectionLineAtPoint(line, currentPoint, worldWidth, worldHeight) {
+  if (!line) return null;
+
+  return buildDirectionLineFromHeading(
+    currentPoint,
+    line.velocityXPerStep,
+    line.velocityYPerStep,
+    worldWidth,
+    worldHeight
+  );
+}
+
+function buildExpectedTrailDirectionLine(
+  trailPoints,
+  currentPoint,
+  stableLine,
+  recalculatedLine,
+  routeTrigger,
+  worldWidth,
+  worldHeight
+) {
+  const averageTrail = buildAverageTrailVector(trailPoints, worldWidth);
+
+  if (!currentPoint || averageTrail.vectorCount < 1) {
+    return {
+      line: null,
+      pointCount: averageTrail.pointCount,
+      mode: 'waiting'
+    };
+  }
+
+  if (!stableLine) {
+    return {
+      line: buildDirectionLineFromHeading(
+        currentPoint,
+        averageTrail.vector.x,
+        averageTrail.vector.y,
+        worldWidth,
+        worldHeight
+      ),
+      pointCount: averageTrail.vectorCount + 1,
+      mode: `average ${averageTrail.vectorCount} trail vector${averageTrail.vectorCount === 1 ? '' : 's'}`
+    };
+  }
+
+  const stableVector = buildVector(stableLine.velocityXPerStep, stableLine.velocityYPerStep);
+  const directionAgreement = normalizedVectorDot(stableVector, averageTrail.vector);
+  const routeTriggerRecalculate = Boolean(routeTrigger?.shouldRecalculate);
+  const shouldRecalculate =
+    routeTriggerRecalculate ||
+    averageTrail.vectorCount >= EXPECTED_PATH_MIN_RECALCULATE_VECTORS &&
+    directionAgreement < EXPECTED_PATH_RECALCULATE_DOT;
+
+  if (shouldRecalculate) {
+    const recentLine = anchorDirectionLineAtPoint(recalculatedLine, currentPoint, worldWidth, worldHeight);
+
+    return {
+      line: recentLine || buildDirectionLineFromHeading(
+        currentPoint,
+        averageTrail.vector.x,
+        averageTrail.vector.y,
+        worldWidth,
+        worldHeight
+      ),
+      pointCount: averageTrail.vectorCount + 1,
+      mode: routeTriggerRecalculate
+        ? recentLine
+          ? 'route trigger recalculated slope'
+          : 'route trigger average correction'
+        : recentLine
+          ? 'recalculated slope'
+          : 'average correction'
+    };
+  }
+
+  return {
+    line: anchorDirectionLineAtPoint(stableLine, currentPoint, worldWidth, worldHeight),
+    pointCount: averageTrail.vectorCount + 1,
+    mode: `stable slope (${averageTrail.vectorCount} avg)`
+  };
+}
+
 function buildDirectionLineFromHeading(latestPoint, headingX, headingY, worldWidth, worldHeight) {
   const latestX = Number(latestPoint?.x);
   const latestY = Number(latestPoint?.y);
@@ -277,14 +444,28 @@ function buildDirectionLineFromHeading(latestPoint, headingX, headingY, worldWid
 
   const slopeLength = worldHeight;
   const startX = normalizeX(latestX, worldWidth);
+  const startY = clampY(latestY, worldHeight);
   const dx = (headingX / speed) * slopeLength;
   const dy = (headingY / speed) * slopeLength;
-  const endY = clampY(latestY + dy, worldHeight);
+  const rawEndY = startY + dy;
+  let clipFactor = 1;
+
+  if (dy < 0 && rawEndY < 0) {
+    clipFactor = -startY / dy;
+  } else if (dy > 0 && rawEndY > worldHeight) {
+    clipFactor = (worldHeight - startY) / dy;
+  }
+
+  clipFactor = Math.max(0, Math.min(1, clipFactor));
+
+  const clippedDx = dx * clipFactor;
+  const clippedDy = dy * clipFactor;
+  const endY = clampY(startY + clippedDy, worldHeight);
 
   return {
-    start: { ...latestPoint, x: startX, y: clampY(latestY, worldHeight) },
-    end: { x: startX + dx, y: endY },
-    length: Math.hypot(dx, endY - latestY),
+    start: { ...latestPoint, x: startX, y: startY },
+    end: { x: startX + clippedDx, y: endY },
+    length: Math.hypot(clippedDx, clippedDy),
     velocityXPerStep: headingX,
     velocityYPerStep: headingY,
     speedPerStep: speed
@@ -363,6 +544,549 @@ function vectorFromPoints(previousPoint, latestPoint, worldWidth) {
   }
 
   return buildVector(unwrapDx(previousX, latestX, worldWidth), latestY - previousY);
+}
+
+function vectorDot(left, right) {
+  return Number(left?.x) * Number(right?.x) + Number(left?.y) * Number(right?.y);
+}
+
+function normalizedVectorDot(left, right) {
+  const leftLength = Number(left?.length);
+  const rightLength = Number(right?.length);
+  if (!Number.isFinite(leftLength) || !Number.isFinite(rightLength) || leftLength <= 0 || rightLength <= 0) return 1;
+
+  return vectorDot(left, right) / (leftLength * rightLength);
+}
+
+function medianNumber(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value > MIN_FILTERED_DIRECTION_SPEED)
+    .sort((left, right) => left - right);
+
+  if (!sorted.length) return 0;
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function buildMovementVectors(points, worldWidth) {
+  const vectors = [];
+
+  for (let index = 1; index < points.length; index += 1) {
+    vectors.push(vectorFromPoints(points[index - 1], points[index], worldWidth));
+  }
+
+  return vectors;
+}
+
+function getTimedRouteEntries(points) {
+  return (points || [])
+    .map((point) => ({
+      point,
+      time: getPointTimestamp(point)
+    }))
+    .filter((entry) => {
+      const x = Number(entry.point?.x);
+      const y = Number(entry.point?.y);
+      return entry.time != null && Number.isFinite(x) && Number.isFinite(y);
+    })
+    .sort((left, right) => left.time - right.time);
+}
+
+function filterTimedRouteEntries(entries, startTime, endTime, includeEnd = false) {
+  return (entries || []).filter((entry) =>
+    entry.time >= startTime && (includeEnd ? entry.time <= endTime : entry.time < endTime)
+  );
+}
+
+function buildAverageRoutePoint(entries, worldWidth, worldHeight) {
+  if (!entries?.length) return null;
+
+  const anchorX = Number(entries[0].point?.x);
+  if (!Number.isFinite(anchorX)) return null;
+
+  let sumX = 0;
+  let sumY = 0;
+  let sumTime = 0;
+  let count = 0;
+
+  for (const entry of entries) {
+    const pointX = Number(entry.point?.x);
+    const pointY = Number(entry.point?.y);
+
+    if (!Number.isFinite(pointX) || !Number.isFinite(pointY)) continue;
+
+    sumX += anchorX + unwrapDx(anchorX, pointX, worldWidth);
+    sumY += pointY;
+    sumTime += entry.time;
+    count += 1;
+  }
+
+  if (count === 0) return null;
+
+  return {
+    x: normalizeX(sumX / count, worldWidth),
+    y: clampY(sumY / count, worldHeight),
+    timestamp: sumTime / count
+  };
+}
+
+function buildCenteredRoutePoint(entries, centerTime, worldWidth, worldHeight) {
+  return buildAverageRoutePoint(
+    filterTimedRouteEntries(
+      entries,
+      centerTime - ROUTE_TRIGGER_BUCKET_HALF_MS,
+      centerTime + ROUTE_TRIGGER_BUCKET_HALF_MS,
+      true
+    ),
+    worldWidth,
+    worldHeight
+  );
+}
+
+function buildRecentRoutePoint(entries, latestTime, fallbackPoint, worldWidth, worldHeight) {
+  const point = buildAverageRoutePoint(
+    filterTimedRouteEntries(
+      entries,
+      latestTime - ROUTE_TRIGGER_NOW_WINDOW_MS,
+      latestTime,
+      true
+    ),
+    worldWidth,
+    worldHeight
+  );
+
+  if (point) return point;
+
+  const latestPoint = entries[entries.length - 1]?.point || fallbackPoint;
+  if (!latestPoint) return null;
+
+  return {
+    ...latestPoint,
+    x: normalizeX(Number(latestPoint.x), worldWidth),
+    y: clampY(Number(latestPoint.y), worldHeight),
+    timestamp: latestTime
+  };
+}
+
+function getRouteCrossTrackDistance(point, routeAnchorPoint, routeHeadingVector, worldWidth) {
+  const headingUnit = normalizeVector(routeHeadingVector);
+  if (!point || !routeAnchorPoint || headingUnit.length <= 0) return 0;
+
+  const relative = vectorFromPoints(routeAnchorPoint, point, worldWidth);
+  return Math.abs(relative.x * headingUnit.y - relative.y * headingUnit.x);
+}
+
+function projectPointOnRoute(point, routeAnchorPoint, routeHeadingVector, worldWidth, worldHeight) {
+  const headingUnit = normalizeVector(routeHeadingVector);
+  if (!point || !routeAnchorPoint || headingUnit.length <= 0) return null;
+
+  const anchorX = Number(routeAnchorPoint.x);
+  const anchorY = Number(routeAnchorPoint.y);
+  if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) return null;
+
+  const relative = vectorFromPoints(routeAnchorPoint, point, worldWidth);
+  const alongTrackDistance = vectorDot(relative, headingUnit);
+
+  return {
+    ...point,
+    x: normalizeX(anchorX + headingUnit.x * alongTrackDistance, worldWidth),
+    y: clampY(anchorY + headingUnit.y * alongTrackDistance, worldHeight)
+  };
+}
+
+function calculateRouteTriggerTolerance(entries, latestTime, worldWidth) {
+  const recentPoints = filterTimedRouteEntries(
+    entries,
+    latestTime - ROUTE_TRIGGER_ANCHOR_MS,
+    latestTime,
+    true
+  ).map((entry) => entry.point);
+  const vectors = buildMovementVectors(
+    recentPoints.length >= 2 ? recentPoints : entries.map((entry) => entry.point),
+    worldWidth
+  );
+  const medianStep = medianNumber(vectors.map((vector) => vector.length));
+  const adaptiveTolerance = medianStep * ROUTE_TRIGGER_TOLERANCE_STEP_MULTIPLIER;
+
+  return Math.max(
+    ROUTE_TRIGGER_MIN_TOLERANCE,
+    Math.min(ROUTE_TRIGGER_MAX_TOLERANCE, adaptiveTolerance || 0)
+  );
+}
+
+function buildRouteTriggerCandidate(points, currentPoint, worldWidth, worldHeight) {
+  const entries = getTimedRouteEntries(points);
+
+  if (entries.length < 3) {
+    return { available: false, mode: 'waiting' };
+  }
+
+  const latestTime = entries[entries.length - 1].time;
+  const p20 = buildCenteredRoutePoint(
+    entries,
+    latestTime - ROUTE_TRIGGER_ANCHOR_MS,
+    worldWidth,
+    worldHeight
+  );
+  const p10 = buildCenteredRoutePoint(
+    entries,
+    latestTime - ROUTE_TRIGGER_VALIDATE_MS,
+    worldWidth,
+    worldHeight
+  );
+  const pNow = buildRecentRoutePoint(entries, latestTime, currentPoint, worldWidth, worldHeight);
+
+  if (!p20 || !p10 || !pNow) {
+    return { available: false, mode: 'waiting' };
+  }
+
+  const routeVector = vectorFromPoints(p20, pNow, worldWidth);
+  if (routeVector.length < ROUTE_TRIGGER_MIN_DISTANCE) {
+    return { available: false, mode: 'waiting' };
+  }
+
+  const routeHeadingVector = normalizeVector(routeVector);
+  const routeAnchorPoint = projectPointOnRoute(
+    p10,
+    p20,
+    routeHeadingVector,
+    worldWidth,
+    worldHeight
+  ) || p20;
+  const crossTrackDistance = getRouteCrossTrackDistance(
+    p10,
+    p20,
+    routeHeadingVector,
+    worldWidth
+  );
+  const tolerance = calculateRouteTriggerTolerance(entries, latestTime, worldWidth);
+
+  return {
+    available: true,
+    valid: crossTrackDistance <= tolerance,
+    latestTime,
+    routeAnchorPoint,
+    routeHeadingVector,
+    crossTrackDistance,
+    tolerance
+  };
+}
+
+function pushRouteTriggerResult(results, passed) {
+  const next = [...(Array.isArray(results) ? results : []), Boolean(passed)];
+  return next.slice(-ROUTE_TRIGGER_FAILURE_WINDOW);
+}
+
+function countRouteTriggerFailures(results) {
+  return (results || []).filter((passed) => !passed).length;
+}
+
+function createRouteTriggerState(resetKey) {
+  return {
+    resetKey,
+    mode: 'waiting',
+    shouldRecalculate: false,
+    routeAnchorPoint: null,
+    routeHeadingVector: null,
+    validationResults: [],
+    lastPointKey: '',
+    lastRecheckTime: null,
+    crossTrackDistance: 0,
+    tolerance: 0
+  };
+}
+
+function lockRouteTriggerState(baseState, candidate, currentPoint, currentPointKey, worldWidth, mode = 'tracking') {
+  return {
+    ...baseState,
+    mode,
+    shouldRecalculate: false,
+    routeAnchorPoint: candidate.routeAnchorPoint,
+    routeHeadingVector: candidate.routeHeadingVector,
+    validationResults: [true],
+    lastPointKey: currentPointKey,
+    lastRecheckTime: candidate.latestTime,
+    crossTrackDistance: getRouteCrossTrackDistance(
+      currentPoint,
+      candidate.routeAnchorPoint,
+      candidate.routeHeadingVector,
+      worldWidth
+    ),
+    tolerance: candidate.tolerance
+  };
+}
+
+function updateRouteTriggerState({
+  previousState,
+  points,
+  currentPoint,
+  resetKey,
+  worldWidth,
+  worldHeight
+}) {
+  const currentPointKey = currentPoint ? getPointKey(currentPoint) : '';
+  const baseState =
+    previousState?.resetKey === resetKey
+      ? previousState
+      : createRouteTriggerState(resetKey);
+
+  if (!currentPoint) {
+    return {
+      ...baseState,
+      mode: 'waiting',
+      shouldRecalculate: false,
+      lastPointKey: currentPointKey
+    };
+  }
+
+  if (baseState.lastPointKey === currentPointKey) return baseState;
+
+  const candidate = buildRouteTriggerCandidate(points, currentPoint, worldWidth, worldHeight);
+  const hasLockedRoute = baseState.routeAnchorPoint && baseState.routeHeadingVector;
+
+  if (hasLockedRoute) {
+    const tolerance = candidate.available
+      ? candidate.tolerance
+      : baseState.tolerance || ROUTE_TRIGGER_MIN_TOLERANCE;
+    const crossTrackDistance = getRouteCrossTrackDistance(
+      currentPoint,
+      baseState.routeAnchorPoint,
+      baseState.routeHeadingVector,
+      worldWidth
+    );
+    const validationResults = pushRouteTriggerResult(
+      baseState.validationResults,
+      crossTrackDistance <= tolerance
+    );
+    const failed =
+      countRouteTriggerFailures(validationResults) >= ROUTE_TRIGGER_FAILURES_TO_RECALCULATE;
+
+    if (failed) {
+      return {
+        ...baseState,
+        mode: 'recalculating',
+        shouldRecalculate: true,
+        routeAnchorPoint: null,
+        routeHeadingVector: null,
+        validationResults,
+        lastPointKey: currentPointKey,
+        lastRecheckTime: candidate.available ? candidate.latestTime : baseState.lastRecheckTime,
+        crossTrackDistance,
+        tolerance
+      };
+    }
+
+    const lastRecheckTime = Number(baseState.lastRecheckTime || 0);
+    const shouldRecheck =
+      candidate.available &&
+      (!Number.isFinite(lastRecheckTime) ||
+        candidate.latestTime - lastRecheckTime >= ROUTE_TRIGGER_RECHECK_MS);
+
+    if (shouldRecheck && candidate.valid) {
+      return lockRouteTriggerState(
+        baseState,
+        candidate,
+        currentPoint,
+        currentPointKey,
+        worldWidth,
+        'tracking'
+      );
+    }
+
+    return {
+      ...baseState,
+      mode: 'tracking',
+      shouldRecalculate: false,
+      validationResults,
+      lastPointKey: currentPointKey,
+      lastRecheckTime: shouldRecheck ? candidate.latestTime : baseState.lastRecheckTime,
+      crossTrackDistance,
+      tolerance
+    };
+  }
+
+  if (candidate.available && candidate.valid) {
+    return lockRouteTriggerState(
+      baseState,
+      candidate,
+      currentPoint,
+      currentPointKey,
+      worldWidth
+    );
+  }
+
+  return {
+    ...baseState,
+    mode: baseState.shouldRecalculate ? 'recalculating' : 'waiting',
+    shouldRecalculate: Boolean(baseState.shouldRecalculate),
+    validationResults: candidate.available ? [candidate.valid] : baseState.validationResults,
+    lastPointKey: currentPointKey,
+    lastRecheckTime: candidate.available ? candidate.latestTime : baseState.lastRecheckTime,
+    crossTrackDistance: candidate.available ? candidate.crossTrackDistance : baseState.crossTrackDistance,
+    tolerance: candidate.available ? candidate.tolerance : baseState.tolerance
+  };
+}
+
+function localMedianVectorLength(vectors, centerIndex, excludeIndexes = [], extraLengths = [], radius = 3) {
+  const excluded = new Set(excludeIndexes);
+  const lengths = [...extraLengths];
+  const start = Math.max(0, centerIndex - radius);
+  const end = Math.min(vectors.length - 1, centerIndex + radius);
+
+  for (let index = start; index <= end; index += 1) {
+    if (!excluded.has(index)) lengths.push(vectors[index]?.length);
+  }
+
+  return medianNumber(lengths);
+}
+
+function averageUnitVector(vectors, startIndex, endIndex) {
+  let x = 0;
+  let y = 0;
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const vector = vectors[index];
+    if (!vector || vector.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+    const unit = normalizeVector(vector);
+    x += unit.x;
+    y += unit.y;
+  }
+
+  return buildVector(x, y);
+}
+
+function buildDirectionPointSignature(points) {
+  return points
+    .slice(-DIRECTION_REPLAY_POINT_LIMIT)
+    .map((point, index) => getPointKey(point, index))
+    .join('|');
+}
+
+function cleanDirectionPointsForSlope(points, worldWidth, filterMode) {
+  const mode = normalizeMapSlopeOutlierFilter(filterMode);
+  const originalVectorCount = Math.max(0, (points?.length || 0) - 1);
+
+  if (mode === 'off' || !points?.length || points.length < 3) {
+    return {
+      points: points || [],
+      originalVectorCount,
+      cleanedVectorCount: originalVectorCount,
+      rejectedPointCount: 0,
+      rejectedVectorCount: 0,
+      signature: ''
+    };
+  }
+
+  const settings = SLOPE_OUTLIER_FILTERS[mode] || SLOPE_OUTLIER_FILTERS.balanced;
+  const vectors = buildMovementVectors(points, worldWidth);
+  const rejectedPointIndexes = new Set();
+
+  for (let pointIndex = 1; pointIndex < points.length - 1; pointIndex += 1) {
+    const incomingIndex = pointIndex - 1;
+    const outgoingIndex = pointIndex;
+    const incoming = vectors[incomingIndex];
+    const outgoing = vectors[outgoingIndex];
+    const direct = vectorFromPoints(points[pointIndex - 1], points[pointIndex + 1], worldWidth);
+
+    if (
+      !incoming ||
+      !outgoing ||
+      incoming.length <= MIN_FILTERED_DIRECTION_SPEED ||
+      outgoing.length <= MIN_FILTERED_DIRECTION_SPEED
+    ) {
+      continue;
+    }
+
+    const localMedian = localMedianVectorLength(
+      vectors,
+      incomingIndex,
+      [incomingIndex, outgoingIndex],
+      [direct.length]
+    ) || Math.max(direct.length, 1);
+    const requiredLength = Math.max(
+      settings.minSpikeDistance,
+      localMedian * settings.spikeLengthMultiplier
+    );
+    const directLimit = Math.max(
+      localMedian * settings.directDistanceMultiplier,
+      Math.min(incoming.length, outgoing.length) * settings.directDistanceRatio
+    );
+
+    if (
+      incoming.length >= requiredLength &&
+      outgoing.length >= requiredLength &&
+      normalizedVectorDot(incoming, outgoing) <= settings.spikeOppositionDot &&
+      direct.length <= directLimit
+    ) {
+      rejectedPointIndexes.add(pointIndex);
+    }
+  }
+
+  let entries = points
+    .map((point, originalIndex) => ({ point, originalIndex }))
+    .filter((entry) => !rejectedPointIndexes.has(entry.originalIndex));
+
+  if (entries.length >= 5) {
+    const cleanedVectors = buildMovementVectors(entries.map((entry) => entry.point), worldWidth);
+    const rejectedCleanedIndexes = new Set();
+
+    for (let vectorIndex = 1; vectorIndex < cleanedVectors.length - 1; vectorIndex += 1) {
+      const candidate = cleanedVectors[vectorIndex];
+      if (!candidate || candidate.length <= MIN_FILTERED_DIRECTION_SPEED) continue;
+
+      const previousHeading = averageUnitVector(
+        cleanedVectors,
+        Math.max(0, vectorIndex - 2),
+        vectorIndex - 1
+      );
+      const nextHeading = averageUnitVector(
+        cleanedVectors,
+        vectorIndex + 1,
+        Math.min(cleanedVectors.length - 1, vectorIndex + 2)
+      );
+      const localMedian = localMedianVectorLength(cleanedVectors, vectorIndex, [vectorIndex]);
+      const requiredLength = Math.max(
+        settings.segmentMinDistance,
+        Math.max(localMedian, 1) * settings.segmentLengthMultiplier
+      );
+
+      if (
+        previousHeading.length > MIN_FILTERED_DIRECTION_SPEED &&
+        nextHeading.length > MIN_FILTERED_DIRECTION_SPEED &&
+        candidate.length >= requiredLength &&
+        normalizedVectorDot(previousHeading, nextHeading) >= settings.segmentAgreeDot &&
+        normalizedVectorDot(candidate, previousHeading) <= settings.segmentDisagreeDot &&
+        normalizedVectorDot(candidate, nextHeading) <= settings.segmentDisagreeDot
+      ) {
+        rejectedCleanedIndexes.add(vectorIndex + 1);
+      }
+    }
+
+    if (rejectedCleanedIndexes.size) {
+      for (const cleanedIndex of rejectedCleanedIndexes) {
+        const entry = entries[cleanedIndex];
+        if (entry) rejectedPointIndexes.add(entry.originalIndex);
+      }
+
+      entries = entries.filter((entry) => !rejectedPointIndexes.has(entry.originalIndex));
+    }
+  }
+
+  const cleanedPoints = entries.map((entry) => entry.point);
+  const cleanedVectorCount = Math.max(0, cleanedPoints.length - 1);
+
+  return {
+    points: cleanedPoints,
+    originalVectorCount,
+    cleanedVectorCount,
+    rejectedPointCount: rejectedPointIndexes.size,
+    rejectedVectorCount: Math.max(0, originalVectorCount - cleanedVectorCount),
+    signature: buildDirectionPointSignature(cleanedPoints)
+  };
 }
 
 function createDirectionShipState(initialPoint, resetKey) {
@@ -770,6 +1494,10 @@ export default function WrappedCoordinateMap({
   waypointOffsetX,
   waypointOffsetY,
   mapSlopePointCount = DEFAULT_MAP_SLOPE_POINT_COUNT,
+  mapSlopeOutlierFilter = DEFAULT_MAP_SLOPE_OUTLIER_FILTER,
+  markerCoordinate = null,
+  onMarkerCoordinateChange,
+  isActive = true,
   refreshCoordinates
 }) {
   const [zoom, setZoom] = useState(0.075);
@@ -784,7 +1512,6 @@ export default function WrappedCoordinateMap({
   const [showGoodSearchSettings, setShowGoodSearchSettings] = useState(false);
   const [showMapInfo, setShowMapInfo] = useState(true);
   const [mouseCoordinate, setMouseCoordinate] = useState(null);
-  const [markerCoordinate, setMarkerCoordinate] = useState(null);
   const [markerInput, setMarkerInput] = useState({ x: '', y: '' });
 
   const [precisionMode, setPrecisionMode] = useState(false);
@@ -803,6 +1530,7 @@ export default function WrappedCoordinateMap({
   const cityClickRef = useRef(null);
   const ignoredTrailKeysRef = useRef(new Set());
   const roundedDirectionShipRef = useRef(null);
+  const routeTriggerRef = useRef(null);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -813,6 +1541,18 @@ export default function WrappedCoordinateMap({
   }, [pan]);
 
   useEffect(() => {
+    if (!markerCoordinate) {
+      setMarkerInput({ x: '', y: '' });
+      return;
+    }
+
+    setMarkerInput({
+      x: String(markerCoordinate.x),
+      y: String(markerCoordinate.y)
+    });
+  }, [markerCoordinate]);
+
+  useEffect(() => {
     if (!showCityLayer) {
       setSelectedCityName('');
       setCityGoodSearch('');
@@ -820,7 +1560,7 @@ export default function WrappedCoordinateMap({
   }, [showCityLayer]);
 
   useEffect(() => {
-    if (!isFullBrowserMap) return undefined;
+    if (!isFullBrowserMap || !isActive) return undefined;
 
     document.body.classList.add('map-full-browser-active');
     setShowGoodSearchSettings(true);
@@ -837,7 +1577,7 @@ export default function WrappedCoordinateMap({
       document.body.classList.remove('map-full-browser-active');
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isFullBrowserMap]);
+  }, [isFullBrowserMap, isActive]);
 
   const orderedCoordinates = useMemo(
     () => [...coordinates].sort(compareCoordinatePoints),
@@ -946,28 +1686,37 @@ export default function WrappedCoordinateMap({
   const ocrRunningState = getOcrRunningState(ocrStatus);
   const ocrRunning = ocrRunningState === true;
   const ocrStatusLabel = ocrRunningState == null ? 'Unknown' : ocrRunning ? 'Running' : 'Stopped';
-  const coordinateSpeed = useMemo(
-    () => calculateCoordinateSpeed(orderedCoordinates, worldWidth),
-    [orderedCoordinates, worldWidth]
-  );
+  const coordinateSpeed = useMemo(() => {
+    const backendSpeed = getBackendSpeedKnots(current);
+    return backendSpeed ?? calculateCoordinateSpeed(orderedCoordinates, worldWidth);
+  }, [current, orderedCoordinates, worldWidth]);
   const coordinateSpeedLabel = coordinateSpeed.toFixed(1);
 
   const trailSegments = useMemo(
     () => splitWrappedSegments(displayTrailCoordinates, worldWidth),
     [displayTrailCoordinates, worldWidth]
   );
+  const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
 
-  const slopeFit = useMemo(
+  const slopeOutlierFilter = normalizeMapSlopeOutlierFilter(mapSlopeOutlierFilter);
+  const slopeCleanup = useMemo(
+    () => cleanDirectionPointsForSlope(distinctDisplayMovingCoordinates, worldWidth, slopeOutlierFilter),
+    [distinctDisplayMovingCoordinates, worldWidth, slopeOutlierFilter]
+  );
+
+  const stableDirection = useMemo(
     () => {
       const resetKey = [
         worldWidth,
         worldHeight,
         waypointOffsetX,
         waypointOffsetY,
-        clampMapSlopePointCount(mapSlopePointCount)
+        clampMapSlopePointCount(mapSlopePointCount),
+        slopeOutlierFilter,
+        slopeOutlierFilter === 'off' ? '' : slopeCleanup.signature
       ].join(':');
       const result = buildRoundedDirectionLine(
-        distinctDisplayMovingCoordinates,
+        slopeCleanup.points,
         roundedDirectionShipRef.current,
         worldWidth,
         worldHeight,
@@ -979,12 +1728,80 @@ export default function WrappedCoordinateMap({
       return result;
     },
     [
-      distinctDisplayMovingCoordinates,
+      slopeCleanup,
+      slopeOutlierFilter,
       worldWidth,
       worldHeight,
       waypointOffsetX,
       waypointOffsetY,
       mapSlopePointCount
+    ]
+  );
+
+  const recalculatedDirection = useMemo(
+    () =>
+      buildRoundedDirectionLine(
+        slopeCleanup.points.slice(-(EXPECTED_PATH_AVERAGE_VECTOR_COUNT + 1)),
+        null,
+        worldWidth,
+        worldHeight,
+        EXPECTED_PATH_AVERAGE_VECTOR_COUNT,
+        `recent:${slopeCleanup.signature}`
+      ),
+    [slopeCleanup, worldHeight, worldWidth]
+  );
+
+  const routeTrigger = useMemo(
+    () => {
+      const resetKey = [
+        worldWidth,
+        worldHeight,
+        waypointOffsetX,
+        waypointOffsetY,
+        slopeOutlierFilter
+      ].join(':');
+      const result = updateRouteTriggerState({
+        previousState: routeTriggerRef.current,
+        points: slopeCleanup.points,
+        currentPoint: displayCurrent,
+        resetKey,
+        worldWidth,
+        worldHeight
+      });
+
+      routeTriggerRef.current = result;
+      return result;
+    },
+    [
+      displayCurrent,
+      slopeCleanup.points,
+      slopeOutlierFilter,
+      waypointOffsetX,
+      waypointOffsetY,
+      worldHeight,
+      worldWidth
+    ]
+  );
+
+  const expectedTrailDirection = useMemo(
+    () =>
+      buildExpectedTrailDirectionLine(
+        displayTrailCoordinates,
+        displayCurrent,
+        stableDirection.line,
+        recalculatedDirection.line,
+        routeTrigger,
+        worldWidth,
+        worldHeight
+      ),
+    [
+      displayCurrent,
+      displayTrailCoordinates,
+      stableDirection.line,
+      recalculatedDirection.line,
+      routeTrigger,
+      worldHeight,
+      worldWidth
     ]
   );
   const latestMovementKey = useMemo(() => {
@@ -996,10 +1813,12 @@ export default function WrappedCoordinateMap({
     return `${getPointKey(previous)}>${getPointKey(latest)}:${clampMapSlopePointCount(mapSlopePointCount)}`;
   }, [distinctDisplayMovingCoordinates, mapSlopePointCount]);
 
-  const slopeLine = slopeFit.line;
-  const slopeFitCount = slopeFit.pointCount;
-
-  const displayCurrent = displayCoordinates[displayCoordinates.length - 1];
+  const slopeLine = expectedTrailDirection.line;
+  const expectedTrailPointCount = expectedTrailDirection.pointCount;
+  const expectedTrailMode = expectedTrailDirection.mode;
+  const routeTriggerMode = routeTrigger?.mode || 'waiting';
+  const routeTriggerCrossTrackDistance = Number(routeTrigger?.crossTrackDistance || 0);
+  const routeTriggerTolerance = Number(routeTrigger?.tolerance || 0);
   const visualZeroX = normalizeX(xZeroOffset, worldWidth);
 
   const trailLineWidth = precisionMode
@@ -1016,8 +1835,8 @@ export default function WrappedCoordinateMap({
   const currentArrowSize = currentPointRadius * 2.2;
   const currentArrowAngle = slopeLine
     ? (Math.atan2(
-        Number(slopeLine.end.y) - Number(slopeLine.start.y),
-        Number(slopeLine.end.x) - Number(slopeLine.start.x)
+        Number(slopeLine.velocityYPerStep),
+        Number(slopeLine.velocityXPerStep)
       ) * 180) / Math.PI
     : 0;
 
@@ -1235,10 +2054,10 @@ export default function WrappedCoordinateMap({
       const y = Math.round(clampY(coordinate.y, worldHeight));
       const next = { x, y };
 
-      setMarkerCoordinate(next);
+      onMarkerCoordinateChange?.(next);
       setMarkerInput({ x: String(x), y: String(y) });
     },
-    [worldHeight, worldWidth]
+    [onMarkerCoordinateChange, worldHeight, worldWidth]
   );
 
   const updateMarkerInput = (field, value) => {
@@ -1248,7 +2067,7 @@ export default function WrappedCoordinateMap({
       const y = Number(nextInput.y);
 
       if (nextInput.x !== '' && nextInput.y !== '' && Number.isFinite(x) && Number.isFinite(y)) {
-        setMarkerCoordinate({
+        onMarkerCoordinateChange?.({
           x: Math.round(normalizeX(x, worldWidth)),
           y: Math.round(clampY(y, worldHeight))
         });
@@ -1757,7 +2576,7 @@ export default function WrappedCoordinateMap({
               <Button
                 className="map-compact-button"
                 onClick={() => {
-                  setMarkerCoordinate(null);
+                  onMarkerCoordinateChange?.(null);
                   setMarkerInput({ x: '', y: '' });
                 }}
                 disabled={!markerCoordinate}
@@ -1857,8 +2676,16 @@ export default function WrappedCoordinateMap({
               Direction length: map height
             </span>
             <span className="map-info-row map-info-direction">
-              Slope direction: {slopeFitCount} vector{slopeFitCount === 1 ? '' : 's'}
+              Expected path: {expectedTrailPointCount >= 2 ? expectedTrailMode : 'waiting for movement'}
             </span>
+            <span className="map-info-row map-info-direction">
+              Route check: {routeTriggerMode}
+            </span>
+            {routeTriggerTolerance > 0 && (
+              <span className="map-info-row map-info-direction">
+                Cross-track: {routeTriggerCrossTrackDistance.toFixed(1)} / {routeTriggerTolerance.toFixed(1)} map units
+              </span>
+            )}
             <span className="map-info-row map-info-zoom">Zoom {(zoom * 100).toFixed(1)}%</span>
             {showCityLayer && <span className="map-info-row map-info-city-links">City links: {cityMarkers.length} cities / {visibleCityMarkers.length} visible</span>}
             {showCityLayer && hasCityGoodSearch && (

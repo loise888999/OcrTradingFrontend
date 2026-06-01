@@ -3,11 +3,15 @@ import {
   AlertCircle,
   CheckCircle2,
   Crosshair,
+  Eye,
+  EyeOff,
   Map,
   RefreshCw,
+  RotateCcw,
   Settings,
   ShoppingCart,
   SlidersHorizontal,
+  StickyNote,
   Trash2,
   TrendingUp
 } from 'lucide-react';
@@ -18,8 +22,15 @@ import TradingTab from './components/TradingTab.jsx';
 import SortableTable from './components/SortableTable.jsx';
 import WrappedCoordinateMap from './components/WrappedCoordinateMap.jsx';
 import CoordinateOcrSettingsPanel from './components/CoordinateOcrSettingsPanel.jsx';
+import PriceTradeTypeTemplateSettingsPanel from './components/PriceTradeTypeTemplateSettingsPanel.jsx';
 import DataSharingPanel from './components/DataSharingPanel.jsx';
 import MapEditorPanel from './components/MapEditorPanel.jsx';
+import FloatingNote, {
+  FLOATING_NOTE_SETTING_KEY,
+  createDefaultFloatingNoteState,
+  normalizeFloatingNoteState,
+  resetFloatingNoteLayout
+} from './components/FloatingNote.jsx';
 
 const DEFAULT_WORLD_WIDTH = 16384;
 const DEFAULT_WORLD_HEIGHT = 8192;
@@ -29,6 +40,7 @@ const DEFAULT_WAYPOINT_OFFSET_Y = 0;
 const DEFAULT_OCR_INTERVAL = 1;
 const DEFAULT_CITY_INTERVAL = 8;
 const DEFAULT_MAP_SLOPE_POINT_COUNT = 10;
+const DEFAULT_MAP_SLOPE_OUTLIER_FILTER = 'balanced';
 const MAP_IMAGE_URL = '/maps/world-map.png';
 const PRICE_HISTORY_INITIAL_VISIBLE = 20;
 const PRICE_HISTORY_LOAD_STEP = 20;
@@ -57,6 +69,13 @@ function clampMapSlopePointCount(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_MAP_SLOPE_POINT_COUNT;
   return Math.max(3, Math.min(25, Math.round(parsed)));
+}
+
+function normalizeMapSlopeOutlierFilter(value) {
+  const normalized = String(value || DEFAULT_MAP_SLOPE_OUTLIER_FILTER).trim().toLowerCase();
+  return ['off', 'balanced', 'strict'].includes(normalized)
+    ? normalized
+    : DEFAULT_MAP_SLOPE_OUTLIER_FILTER;
 }
 
 function applyWaypointOffset(point, waypointOffsetX, waypointOffsetY, worldWidth, worldHeight) {
@@ -660,6 +679,8 @@ function SettingsTab({
   settings,
   saveSetting,
   setSettings,
+  floatingNoteState,
+  updateFloatingNoteState,
   run,
   refreshPrices,
   refreshCatalogs,
@@ -677,6 +698,19 @@ function SettingsTab({
       key,
       value: String(value)
     });
+  };
+
+  const toggleFloatingNote = () => {
+    updateFloatingNoteState({ visible: !floatingNoteState.visible });
+  };
+
+  const resetFloatingNote = () => {
+    updateFloatingNoteState((current) =>
+      resetFloatingNoteLayout({
+        ...current,
+        visible: true
+      })
+    );
   };
 
   return (
@@ -718,12 +752,27 @@ function SettingsTab({
         >
           <Crosshair size={16} /> Coordinate OCR
         </button>
+        <button
+          type="button"
+          className={settingsSubtab === 'buy-sell-ocr' ? 'active' : ''}
+          onClick={() => setSettingsSubtab('buy-sell-ocr')}
+        >
+          <ShoppingCart size={16} /> Buy/Sell OCR
+        </button>
       </div>
 
       {settingsSubtab === 'coordinate-ocr' && (
         <Card>
           <div className="card-body">
             <CoordinateOcrSettingsPanel run={run} />
+          </div>
+        </Card>
+      )}
+
+      {settingsSubtab === 'buy-sell-ocr' && (
+        <Card>
+          <div className="card-body">
+            <PriceTradeTypeTemplateSettingsPanel run={run} />
           </div>
         </Card>
       )}
@@ -749,6 +798,33 @@ function SettingsTab({
       />
 
       <div className="settings-grid">
+        <Card>
+          <div className="card-body">
+            <h3>
+              <StickyNote size={20} /> Floating note
+            </h3>
+
+            <div className="floating-note-settings-actions">
+              <Button
+                variant={floatingNoteState.visible ? 'secondary' : 'primary'}
+                onClick={toggleFloatingNote}
+              >
+                {floatingNoteState.visible ? <EyeOff size={16} /> : <Eye size={16} />}
+                {floatingNoteState.visible ? 'Hide note' : 'Show note'}
+              </Button>
+
+              <Button variant="secondary" onClick={resetFloatingNote}>
+                <RotateCcw size={16} /> Reset layout
+              </Button>
+            </div>
+
+            <div className="mini-info floating-note-settings-status">
+              <strong>{floatingNoteState.visible ? 'Visible' : 'Hidden'}</strong>
+              <span>{floatingNoteState.text.length.toLocaleString()} chars</span>
+            </div>
+          </div>
+        </Card>
+
         <Card>
           <div className="card-body">
             <h3>
@@ -825,6 +901,26 @@ function SettingsTab({
                 }
               />
             </Field>
+
+            <Field
+              label="Direction OCR cleanup"
+              hint="Removes bad one-point coordinate spikes before calculating slope direction."
+            >
+              <select
+                className="input"
+                value={settings.mapSlopeOutlierFilter}
+                onChange={(event) =>
+                  saveMapSetting(
+                    'mapSlopeOutlierFilter',
+                    normalizeMapSlopeOutlierFilter(event.target.value)
+                  )
+                }
+              >
+                <option value="off">Off</option>
+                <option value="balanced">Balanced</option>
+                <option value="strict">Strict</option>
+              </select>
+            </Field>
           </div>
         </Card>
 
@@ -877,11 +973,13 @@ export default function App() {
   const [prices, setPrices] = useState([]);
   const [cities, setCities] = useState([]);
   const [tradeGoods, setTradeGoods] = useState([]);
+  const [mapMarkerCoordinate, setMapMarkerCoordinate] = useState(null);
   const [error, setError] = useState('');
   const [coordinateStreamStatus, setCoordinateStreamStatus] = useState('connecting');
   const coordinateStreamConnectedRef = useRef(false);
   const coordinateFallbackRefreshStartedRef = useRef(false);
   const lastCoordinateUpdateAtRef = useRef(0);
+  const floatingNoteLastSavedRef = useRef('');
 
   const [settings, setSettings] = useState({
     worldWidth: DEFAULT_WORLD_WIDTH,
@@ -891,8 +989,26 @@ export default function App() {
     waypointOffsetY: DEFAULT_WAYPOINT_OFFSET_Y,
     ocrInterval: DEFAULT_OCR_INTERVAL,
     cityInterval: DEFAULT_CITY_INTERVAL,
-    mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT
+    mapSlopePointCount: DEFAULT_MAP_SLOPE_POINT_COUNT,
+    mapSlopeOutlierFilter: DEFAULT_MAP_SLOPE_OUTLIER_FILTER
   });
+  const [floatingNoteState, setFloatingNoteState] = useState(() =>
+    createDefaultFloatingNoteState()
+  );
+  const [floatingNoteLoaded, setFloatingNoteLoaded] = useState(false);
+
+  const updateFloatingNoteState = useCallback((updater) => {
+    setFloatingNoteState((current) => {
+      const raw = typeof updater === 'function'
+        ? updater(current)
+        : {
+            ...current,
+            ...updater
+          };
+
+      return normalizeFloatingNoteState(raw, current);
+    });
+  }, []);
 
   const run = useCallback(async (fn, fallbackMessage = 'Request failed') => {
     try {
@@ -1019,6 +1135,16 @@ export default function App() {
     const data = await run(() => api.getSettings(), 'Could not load settings');
 
     if (data?.settings) {
+      setFloatingNoteState((current) => {
+        const next = normalizeFloatingNoteState(
+          data.settings[FLOATING_NOTE_SETTING_KEY],
+          current
+        );
+        floatingNoteLastSavedRef.current = JSON.stringify(next);
+        return next;
+      });
+      setFloatingNoteLoaded(true);
+
       setSettings((current) => ({
         ...current,
         worldWidth: Number(data.settings.worldWidth ?? current.worldWidth),
@@ -1030,6 +1156,9 @@ export default function App() {
         cityInterval: Number(data.settings.cityInterval ?? current.cityInterval),
         mapSlopePointCount: clampMapSlopePointCount(
           data.settings.mapSlopePointCount ?? current.mapSlopePointCount
+        ),
+        mapSlopeOutlierFilter: normalizeMapSlopeOutlierFilter(
+          data.settings.mapSlopeOutlierFilter ?? current.mapSlopeOutlierFilter
         )
       }));
     }
@@ -1074,9 +1203,30 @@ export default function App() {
     return () => clearInterval(timer);
   }, [refreshAll, refreshStatus, refreshCoordinates, refreshPrices, settings.ocrInterval]);
 
-  const saveSetting = async (setting) => {
-    await run(() => api.saveSetting(setting), 'Could not save setting');
-  };
+  const saveSetting = useCallback(
+    (setting) => run(() => api.saveSetting(setting), 'Could not save setting'),
+    [run]
+  );
+
+  useEffect(() => {
+    if (!floatingNoteLoaded) return undefined;
+
+    const serialized = JSON.stringify(floatingNoteState);
+    if (serialized === floatingNoteLastSavedRef.current) return undefined;
+
+    const timer = setTimeout(async () => {
+      const saved = await saveSetting({
+        key: FLOATING_NOTE_SETTING_KEY,
+        value: serialized
+      });
+
+      if (saved) {
+        floatingNoteLastSavedRef.current = serialized;
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [floatingNoteLoaded, floatingNoteState, saveSetting]);
 
   const startOcr = async () => {
     await run(() => api.startOcr(), 'Could not start OCR');
@@ -1087,6 +1237,8 @@ export default function App() {
     await run(() => api.stopOcr(), 'Could not stop OCR');
     await refreshStatus();
   };
+
+  const latestCoordinate = coordinates[coordinates.length - 1] || null;
 
   return (
     <div className="app-shell">
@@ -1145,7 +1297,7 @@ export default function App() {
       </nav>
 
       <main>
-        {activeTab === 'map' && (
+        <section hidden={activeTab !== 'map'}>
           <WrappedCoordinateMap
             coordinates={coordinates}
             coordinateStreamStatus={coordinateStreamStatus}
@@ -1159,9 +1311,13 @@ export default function App() {
             waypointOffsetX={settings.waypointOffsetX}
             waypointOffsetY={settings.waypointOffsetY}
             mapSlopePointCount={settings.mapSlopePointCount}
+            mapSlopeOutlierFilter={settings.mapSlopeOutlierFilter}
+            markerCoordinate={mapMarkerCoordinate}
+            onMarkerCoordinateChange={setMapMarkerCoordinate}
+            isActive={activeTab === 'map'}
             refreshCoordinates={refreshCoordinates}
           />
-        )}
+        </section>
 
         {activeTab === 'prices' && (
           <PricesTab
@@ -1176,6 +1332,7 @@ export default function App() {
             cities={cities}
             tradeGoods={tradeGoods}
             latestCity={latestCity}
+            latestCoordinate={latestCoordinate}
             run={run}
             api={api}
             refreshCatalogs={refreshCatalogs}
@@ -1187,6 +1344,8 @@ export default function App() {
             settings={settings}
             setSettings={setSettings}
             saveSetting={saveSetting}
+            floatingNoteState={floatingNoteState}
+            updateFloatingNoteState={updateFloatingNoteState}
             run={run}
             refreshPrices={refreshPrices}
             refreshCatalogs={refreshCatalogs}
@@ -1194,6 +1353,11 @@ export default function App() {
           />
         )}
       </main>
+
+      <FloatingNote
+        note={floatingNoteState}
+        onChange={updateFloatingNoteState}
+      />
     </div>
   );
 }
